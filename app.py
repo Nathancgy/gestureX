@@ -38,6 +38,14 @@ def index():
 def second_stage():
     return render_template('second-stage.html')
 
+@app.route('/scene-three')
+def scene_three():
+    return render_template('scene-three.html')
+
+@app.route('/scene-four')
+def scene_four():
+    return render_template('scene-four.html')
+
 # WebSocket to send hand landmark data to the client
 @socketio.on('connect')
 def handle_connect():

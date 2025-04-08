@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GestureX - Scene Four</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Arial', sans-serif;
+            color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        .message {
+            font-size: 2rem;
+            letter-spacing: 0.3rem;
+            text-transform: uppercase;
+            opacity: 0;
+            animation: fade-in 3s ease-in forwards;
+        }
+        @keyframes fade-in {
+            0% { opacity: 0; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="message">Scene Four</div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        // Connect to the WebSocket server
+        const socket = io();
+        
+        // Initialize basic setup
+        function init() {
+            console.log("Scene Four initialized");
+        }
+        
+        // Start initialization
+        init();
+    </script>
+</body>
+</html> 

@@ -114,6 +114,7 @@
         let currentGesture = '';
         let lastGesture = '';
         let handPosition = null;
+        let worldHandPosition = null; // New variable to store world space coordinates
         let isClicking = false;
         let isHolding = false;
         let lastClickTime = 0;
@@ -152,6 +153,18 @@
         const damagedAreas = [];
         const maxParticles = 300;
         
+        // Ecosystem health tracking
+        let ecosystemHealth = 1.0; // 1.0 = fully healthy, 0.0 = fully damaged
+        let isCollapsing = false;
+        let collapseProgress = 0;
+        let devourerParticles = [];
+        let cameraRetreat = {
+            active: false,
+            progress: 0,
+            startScale: 1.0,
+            startRotation: 0
+        };
+        
         // Listen for landmarks and gesture data
         socket.on('landmarks', function(data) {
             handLandmarks = JSON.parse(data);
@@ -163,6 +176,9 @@
                     x: indexTip.x * canvas.width,
                     y: indexTip.y * canvas.height
                 };
+                
+                // Calculate world position (accounting for camera transformations)
+                worldHandPosition = screenToWorldSpace(handPosition.x, handPosition.y);
             }
         });
         
@@ -289,9 +305,37 @@
             }
         }
         
+        // New function to convert screen coordinates to world space
+        function screenToWorldSpace(screenX, screenY) {
+            // Get the center of the screen
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            
+            // Reverse the camera transformations
+            // 1. Translate to origin
+            let worldX = screenX - centerX;
+            let worldY = screenY - centerY;
+            
+            // 2. Reverse rotation
+            const cosTheta = Math.cos(-cameraRotation);
+            const sinTheta = Math.sin(-cameraRotation);
+            const rotatedX = worldX * cosTheta - worldY * sinTheta;
+            const rotatedY = worldX * sinTheta + worldY * cosTheta;
+            
+            // 3. Reverse scale
+            const scaledX = rotatedX / cameraScale;
+            const scaledY = rotatedY / cameraScale;
+            
+            // 4. Reverse offset and translate back
+            worldX = scaledX + centerX - cameraOffset.x;
+            worldY = scaledY + centerY - cameraOffset.y;
+            
+            return { x: worldX, y: worldY };
+        }
+        
         // Handle click gesture
         function handleClick() {
-            if (!handPosition) return;
+            if (!handPosition || !worldHandPosition) return;
             
             const now = performance.now();
             if (now - lastClickTime < 200) return; // Throttle clicks
@@ -299,8 +343,8 @@
             
             // Check for interaction with damaged areas
             for (let area of damagedAreas) {
-                const dx = area.x - handPosition.x;
-                const dy = area.y - handPosition.y;
+                const dx = area.x - worldHandPosition.x;
+                const dy = area.y - worldHandPosition.y;
                 const distance = Math.sqrt(dx * dx + dy * dy);
                 
                 if (distance < area.size && !area.healing) {
@@ -311,8 +355,8 @@
                     // Create healing particles
                     for (let i = 0; i < 20; i++) {
                         createParticle(
-                            handPosition.x, 
-                            handPosition.y, 
+                            worldHandPosition.x, 
+                            worldHandPosition.y, 
                             colors.glow, 
                             5 + Math.random() * 5
                         );
@@ -326,8 +370,8 @@
             let closestDistance = Infinity;
             
             for (let node of nodes) {
-                const dx = node.x - handPosition.x;
-                const dy = node.y - handPosition.y;
+                const dx = node.x - worldHandPosition.x;
+                const dy = node.y - worldHandPosition.y;
                 const distance = Math.sqrt(dx * dx + dy * dy);
                 
                 if (distance < node.size * 3 && distance < closestDistance) {
@@ -357,35 +401,46 @@
                 return;
             }
             
-            // If not interacting with existing structures, create a new small branch
-            if (Math.random() > 0.5) {
-                createBranch(
-                    handPosition.x, 
-                    handPosition.y, 
-                    50 + Math.random() * 50, 
-                    Math.random() * Math.PI * 2, 
-                    2
+            // Create a new branch directly at the index finger position if no interaction with existing elements
+            createBranch(
+                worldHandPosition.x, 
+                worldHandPosition.y, 
+                50 + Math.random() * 50, 
+                Math.random() * Math.PI * 2, 
+                2
+            );
+            
+            // Create particle burst
+            for (let i = 0; i < 15; i++) {
+                createParticle(
+                    worldHandPosition.x, 
+                    worldHandPosition.y, 
+                    {...colors.teal}, 
+                    2 + Math.random() * 3
                 );
-                
-                // Create particle burst
-                for (let i = 0; i < 10; i++) {
-                    createParticle(
-                        handPosition.x, 
-                        handPosition.y, 
-                        {...colors.teal}, 
-                        2 + Math.random() * 3
-                    );
-                }
             }
         }
         
         // Handle hold gesture for crumbling effect
         function handleHold() {
-            if (!handPosition) return;
+            if (!handPosition || !worldHandPosition) return;
             
-            // Find tubes near the hold position
-            const crumbleRadius = 30 + holdDuration * 20; // Radius increases the longer we hold
-            const maxRadius = 100; // Cap the maximum crumble radius
+            const holdRadius = 30 + holdDuration * 25; // Radius increases the longer we hold
+            const maxHoldRadius = 120; // Cap the maximum crumble radius
+            const effectiveRadius = Math.min(holdRadius, maxHoldRadius);
+            
+            // Visual indicator for hold area
+            if (isHolding) {
+                // Create occasional ash particles within the hold area
+                if (Math.random() > 0.7) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const distance = Math.random() * effectiveRadius * 0.9;
+                    createAshParticle(
+                        worldHandPosition.x + Math.cos(angle) * distance,
+                        worldHandPosition.y + Math.sin(angle) * distance
+                    );
+                }
+            }
             
             // Find tubes to crumble
             for (let i = tubes.length - 1; i >= 0; i--) {
@@ -395,6 +450,8 @@
                 // We use a simplified approach by checking several points along the tube
                 const steps = 5;
                 let shouldCrumble = false;
+                let closestPointOnTube = { x: tube.startX, y: tube.startY, t: 0 };
+                let minDistance = Infinity;
                 
                 for (let step = 0; step <= steps; step++) {
                     const t = step / steps;
@@ -405,27 +462,41 @@
                     const x = (1-t)*(1-t)*tube.startX + 2*(1-t)*t*midX + t*t*tube.endX;
                     const y = (1-t)*(1-t)*tube.startY + 2*(1-t)*t*midY + t*t*tube.endY;
                     
-                    const dx = x - handPosition.x;
-                    const dy = y - handPosition.y;
+                    const dx = x - worldHandPosition.x;
+                    const dy = y - worldHandPosition.y;
                     const distance = Math.sqrt(dx * dx + dy * dy);
                     
-                    if (distance < Math.min(crumbleRadius, maxRadius)) {
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        closestPointOnTube = { x, y, t };
+                    }
+                    
+                    if (distance < effectiveRadius) {
                         shouldCrumble = true;
-                        break;
                     }
                 }
                 
                 if (shouldCrumble) {
-                    // Create a damaged area at the tube's midpoint
-                    const midX = (tube.startX + tube.endX) / 2;
-                    const midY = (tube.startY + tube.endY) / 2;
-                    
-                    // Create damaged area
-                    createDamagedArea(midX, midY, 20 + Math.random() * 30);
+                    // Create a damaged area precisely at the closest point on the tube to the finger
+                    createDamagedArea(
+                        closestPointOnTube.x, 
+                        closestPointOnTube.y, 
+                        15 + Math.random() * 25
+                    );
                     
                     // Create ash particles for the crumbling effect
                     for (let k = 0; k < 15; k++) {
-                        const t = Math.random();
+                        // Create particles along the tube with concentration at the closest point
+                        let t;
+                        if (Math.random() > 0.7) {
+                            // Sometimes use random point along tube
+                            t = Math.random();
+                        } else {
+                            // Usually use point near the closest point
+                            t = closestPointOnTube.t + (Math.random() - 0.5) * 0.3;
+                            t = Math.max(0, Math.min(1, t)); // Clamp between 0 and 1
+                        }
+                        
                         const midX = (tube.startX + tube.endX) / 2 + Math.cos(tube.swayPhase) * tube.swayAmount;
                         const midY = (tube.startY + tube.endY) / 2 + Math.sin(tube.swayPhase) * tube.swayAmount;
                         
@@ -442,11 +513,17 @@
                     // Also check if we need to remove associated nodes
                     for (let j = nodes.length - 1; j >= 0; j--) {
                         const node = nodes[j];
-                        const dx = node.x - midX;
-                        const dy = node.y - midY;
-                        const distance = Math.sqrt(dx * dx + dy * dy);
+                        // Check if node is at either end of the tube
+                        const distanceToStart = Math.sqrt(
+                            Math.pow(node.x - tube.startX, 2) + 
+                            Math.pow(node.y - tube.startY, 2)
+                        );
+                        const distanceToEnd = Math.sqrt(
+                            Math.pow(node.x - tube.endX, 2) + 
+                            Math.pow(node.y - tube.endY, 2)
+                        );
                         
-                        if (distance < 30) {
+                        if (distanceToStart < 20 || distanceToEnd < 20) {
                             nodes.splice(j, 1);
                             // Create ember particles for node destruction
                             for (let k = 0; k < 20; k++) {
@@ -511,6 +588,540 @@
             initReef();
         }
         
+        function updateEcosystemHealth() {
+            // Count total structures and damaged areas
+            const totalNodes = nodes.length;
+            const totalTubes = tubes.length;
+            const totalDamaged = damagedAreas.length;
+            
+            // Calculate health ratio (protected from division by zero)
+            const totalStructures = totalNodes + totalTubes;
+            if (totalStructures === 0) return 1.0;
+            
+            // Weighted calculation - damaged areas count more toward health loss
+            const healthyRatio = (totalStructures) / (totalStructures + totalDamaged * 2);
+            
+            // Smooth the health transition
+            ecosystemHealth += (healthyRatio - ecosystemHealth) * deltaTime * 0.5;
+            
+            // Check for ecosystem collapse
+            if (ecosystemHealth < 0.2 && !isCollapsing) {
+                triggerEcosystemCollapse();
+            }
+        }
+        
+        function triggerEcosystemCollapse() {
+            isCollapsing = true;
+            collapseProgress = 0;
+            
+            // Create initial swarm of devourer particles
+            for (let i = 0; i < 200; i++) {
+                createDevourerParticle();
+            }
+            
+            // Slow the camera orbit to almost a stop
+            orbitSpeed = 0.001;
+        }
+        
+        function createDevourerParticle() {
+            // Position particles mostly off-screen initially
+            const angle = Math.random() * Math.PI * 2;
+            const distance = canvas.width * (0.8 + Math.random() * 0.4);
+            const x = canvas.width / 2 + Math.cos(angle) * distance;
+            const y = canvas.height / 2 + Math.sin(angle) * distance;
+            
+            // Random speed toward center
+            const speed = 2 + Math.random() * 4;
+            const targetX = canvas.width / 2 + (Math.random() - 0.5) * canvas.width * 0.5;
+            const targetY = canvas.height / 2 + (Math.random() - 0.5) * canvas.height * 0.5;
+            
+            const dx = targetX - x;
+            const dy = targetY - y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            
+            devourerParticles.push({
+                x, y,
+                vx: (dx / dist) * speed,
+                vy: (dy / dist) * speed,
+                size: 2 + Math.random() * 5,
+                alpha: 0.7 + Math.random() * 0.3,
+                rotationSpeed: (Math.random() - 0.5) * 0.2,
+                rotation: Math.random() * Math.PI * 2,
+                pulsePhase: Math.random() * Math.PI * 2,
+                targetX, targetY,
+                consumed: false,
+                lifespan: 0.7 + Math.random() * 0.3,
+                // Add color variation
+                colorVariation: Math.random(),
+                trailLength: 0,
+                trail: []
+            });
+        }
+        
+        // Update and enhance the devourer swarm appearance
+        function updateAndDrawDevourerSwarm() {
+            if (!isCollapsing) return;
+            
+            // Progress the collapse
+            collapseProgress += deltaTime * 0.2;
+            
+            // Add more particles as collapse progresses
+            if (collapseProgress < 0.6 && Math.random() > 0.8) {
+                for (let i = 0; i < 5; i++) {
+                    createDevourerParticle();
+                }
+            }
+            
+            // After a certain point, start camera retreat
+            if (collapseProgress > 0.7 && !cameraRetreat.active) {
+                cameraRetreat.active = true;
+                cameraRetreat.startScale = cameraScale;
+                cameraRetreat.startRotation = cameraRotation;
+                cameraRetreat.progress = 0;
+            }
+            
+            // Update and draw each particle
+            ctx.save();
+            
+            for (let i = devourerParticles.length - 1; i >= 0; i--) {
+                const particle = devourerParticles[i];
+                
+                // Track previous positions for trail effect
+                if (particle.trail.length > 15) {
+                    particle.trail.shift();
+                }
+                particle.trail.push({x: particle.x, y: particle.y});
+                
+                // Update position
+                particle.x += particle.vx;
+                particle.y += particle.vy;
+                particle.rotation += particle.rotationSpeed;
+                
+                // Check if particle has reached its target
+                const dx = particle.targetX - particle.x;
+                const dy = particle.targetY - particle.y;
+                const distToTarget = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distToTarget < 10 && !particle.consumed) {
+                    // Particle has reached target, now seek out structures to consume
+                    particle.consumed = true;
+                    
+                    // Find closest structure
+                    let closestDist = Infinity;
+                    let closestPoint = { x: particle.x, y: particle.y };
+                    
+                    // Check nodes
+                    for (let node of nodes) {
+                        const nodeDist = Math.sqrt(
+                            Math.pow(node.x - particle.x, 2) + 
+                            Math.pow(node.y - particle.y, 2)
+                        );
+                        if (nodeDist < closestDist) {
+                            closestDist = nodeDist;
+                            closestPoint = { x: node.x, y: node.y };
+                        }
+                    }
+                    
+                    // Check tubes
+                    for (let tube of tubes) {
+                        const tubeStartDist = Math.sqrt(
+                            Math.pow(tube.startX - particle.x, 2) + 
+                            Math.pow(tube.startY - particle.y, 2)
+                        );
+                        const tubeEndDist = Math.sqrt(
+                            Math.pow(tube.endX - particle.x, 2) + 
+                            Math.pow(tube.endY - particle.y, 2)
+                        );
+                        
+                        const minDist = Math.min(tubeStartDist, tubeEndDist);
+                        if (minDist < closestDist) {
+                            closestDist = minDist;
+                            closestPoint = tubeStartDist < tubeEndDist 
+                                ? { x: tube.startX, y: tube.startY }
+                                : { x: tube.endX, y: tube.endY };
+                        }
+                    }
+                    
+                    // Set new target
+                    const angle = Math.atan2(closestPoint.y - particle.y, closestPoint.x - particle.x);
+                    const speed = 1 + Math.random() * 3;
+                    
+                    particle.vx = Math.cos(angle) * speed;
+                    particle.vy = Math.sin(angle) * speed;
+                    particle.targetX = closestPoint.x;
+                    particle.targetY = closestPoint.y;
+                }
+                
+                // "Eating" effect - destroy structures when particles get close
+                if (particle.consumed && collapseProgress > 0.3) {
+                    // Check nodes
+                    for (let j = nodes.length - 1; j >= 0; j--) {
+                        const node = nodes[j];
+                        const nodeDist = Math.sqrt(
+                            Math.pow(node.x - particle.x, 2) + 
+                            Math.pow(node.y - particle.y, 2)
+                        );
+                        
+                        if (nodeDist < node.size + 10) {
+                            // "Consume" the node
+                            nodes.splice(j, 1);
+                            
+                            // Create ember particles for destruction
+                            for (let k = 0; k < 10; k++) {
+                                createAshParticle(node.x, node.y);
+                            }
+                            
+                            // Redirect particle
+                            particle.vx = (Math.random() - 0.5) * 4;
+                            particle.vy = (Math.random() - 0.5) * 4;
+                            break;
+                        }
+                    }
+                    
+                    // Check tubes
+                    for (let j = tubes.length - 1; j >= 0; j--) {
+                        const tube = tubes[j];
+                        const tubeStartDist = Math.sqrt(
+                            Math.pow(tube.startX - particle.x, 2) + 
+                            Math.pow(tube.startY - particle.y, 2)
+                        );
+                        const tubeEndDist = Math.sqrt(
+                            Math.pow(tube.endX - particle.x, 2) + 
+                            Math.pow(tube.endY - particle.y, 2)
+                        );
+                        
+                        if (Math.min(tubeStartDist, tubeEndDist) < 15) {
+                            // "Consume" the tube
+                            tubes.splice(j, 1);
+                            
+                            // Create ember particles for destruction
+                            const midX = (tube.startX + tube.endX) / 2;
+                            const midY = (tube.startY + tube.endY) / 2;
+                            for (let k = 0; k < 8; k++) {
+                                createAshParticle(
+                                    tube.startX + (tube.endX - tube.startX) * Math.random(),
+                                    tube.startY + (tube.endY - tube.startY) * Math.random()
+                                );
+                            }
+                            
+                            // Redirect particle
+                            particle.vx = (Math.random() - 0.5) * 4;
+                            particle.vy = (Math.random() - 0.5) * 4;
+                            break;
+                        }
+                    }
+                }
+                
+                // Draw the devourer particle trails first
+                if (particle.trail.length > 1) {
+                    ctx.beginPath();
+                    ctx.moveTo(particle.trail[0].x, particle.trail[0].y);
+                    
+                    for (let j = 1; j < particle.trail.length; j++) {
+                        ctx.lineTo(particle.trail[j].x, particle.trail[j].y);
+                    }
+                    
+                    // Use bright magenta/purple gradient for trails
+                    const trailGradient = ctx.createLinearGradient(
+                        particle.trail[0].x, particle.trail[0].y,
+                        particle.x, particle.y
+                    );
+                    
+                    // Color based on variation for more visual interest
+                    if (particle.colorVariation < 0.33) {
+                        // Magenta trail
+                        trailGradient.addColorStop(0, `rgba(255, 0, 255, 0)`);
+                        trailGradient.addColorStop(1, `rgba(255, 0, 255, ${0.3 * particle.alpha})`);
+                    } else if (particle.colorVariation < 0.66) {
+                        // Purple trail
+                        trailGradient.addColorStop(0, `rgba(180, 0, 255, 0)`);
+                        trailGradient.addColorStop(1, `rgba(180, 0, 255, ${0.3 * particle.alpha})`);
+                    } else {
+                        // Cyan trail
+                        trailGradient.addColorStop(0, `rgba(0, 255, 255, 0)`);
+                        trailGradient.addColorStop(1, `rgba(0, 255, 255, ${0.3 * particle.alpha})`);
+                    }
+                    
+                    ctx.strokeStyle = trailGradient;
+                    ctx.lineWidth = particle.size * 0.5;
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+                    ctx.stroke();
+                }
+                
+                // Draw the devourer particle
+                const pulse = Math.sin(time * 3 + particle.pulsePhase) * 0.3 + 0.7;
+                
+                // Create a more complex shape - either spiky or tentacle-like
+                ctx.save();
+                ctx.translate(particle.x, particle.y);
+                ctx.rotate(particle.rotation);
+                
+                // Set colors based on variation
+                let r, g, b;
+                if (particle.colorVariation < 0.33) {
+                    // Magenta
+                    r = 255; g = 0; b = 255;
+                } else if (particle.colorVariation < 0.66) {
+                    // Purple
+                    r = 180; g = 0; b = 255;
+                } else {
+                    // Cyan
+                    r = 0; g = 255; b = 255;
+                }
+                
+                // Draw central bright shape
+                const gradient = ctx.createRadialGradient(
+                    0, 0, 0,
+                    0, 0, particle.size * 3
+                );
+                
+                gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${particle.alpha * pulse})`);
+                gradient.addColorStop(0.5, `rgba(${r*0.7}, ${g*0.7}, ${b*0.7}, ${particle.alpha * 0.7 * pulse})`);
+                gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                
+                ctx.fillStyle = gradient;
+                
+                // Draw a spiky or tentacle-like shape
+                ctx.beginPath();
+                const spikes = 5 + Math.floor(Math.random() * 3);
+                const outerRadius = particle.size * 2;
+                const innerRadius = particle.size * 1.2;
+                
+                for (let j = 0; j < spikes * 2; j++) {
+                    const spikeAngle = (j / (spikes * 2)) * Math.PI * 2;
+                    const radius = j % 2 === 0 ? outerRadius : innerRadius;
+                    const x = Math.cos(spikeAngle) * radius;
+                    const y = Math.sin(spikeAngle) * radius;
+                    
+                    if (j === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                
+                ctx.closePath();
+                ctx.fill();
+                
+                // Add bright glow for visibility
+                ctx.globalCompositeOperation = 'screen';
+                const colorGradient = ctx.createRadialGradient(
+                    0, 0, 0,
+                    0, 0, particle.size * 1.5
+                );
+                
+                colorGradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${0.8 * pulse})`);
+                colorGradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, ${0.4 * pulse})`);
+                colorGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                
+                ctx.fillStyle = colorGradient;
+                ctx.beginPath();
+                ctx.arc(0, 0, particle.size * 1.5, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Electric bolts effect during collapse
+                if (collapseProgress > 0.4 && Math.random() > 0.9) {
+                    const boltCount = 2 + Math.floor(Math.random() * 3);
+                    for (let j = 0; j < boltCount; j++) {
+                        const boltAngle = Math.random() * Math.PI * 2;
+                        const boltLength = particle.size * (3 + Math.random() * 5);
+                        
+                        ctx.beginPath();
+                        ctx.moveTo(0, 0);
+                        
+                        let x = 0, y = 0;
+                        const segments = 3 + Math.floor(Math.random() * 3);
+                        
+                        for (let k = 0; k < segments; k++) {
+                            const segmentLength = boltLength / segments;
+                            const segmentAngle = boltAngle + (Math.random() - 0.5) * 1.5;
+                            
+                            x += Math.cos(segmentAngle) * segmentLength;
+                            y += Math.sin(segmentAngle) * segmentLength;
+                            
+                            ctx.lineTo(x, y);
+                        }
+                        
+                        ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${0.7 * pulse})`;
+                        ctx.lineWidth = 1 + Math.random();
+                        ctx.stroke();
+                    }
+                }
+                
+                ctx.restore();
+                
+                // Remove particles that have been around for too long
+                particle.lifespan -= deltaTime * 0.05;
+                if (particle.lifespan <= 0) {
+                    devourerParticles.splice(i, 1);
+                }
+            }
+            
+            ctx.restore();
+            
+            // Draw rippling energy waves across the screen as collapse progresses
+            if (collapseProgress > 0.4) {
+                const waveCount = 3;
+                for (let i = 0; i < waveCount; i++) {
+                    const waveProgress = ((time * 0.5) + (i / waveCount)) % 1.0;
+                    const waveRadius = canvas.width * waveProgress;
+                    
+                    // Only draw waves in the visible range
+                    if (waveRadius > 0 && waveRadius < canvas.width * 1.5) {
+                        ctx.beginPath();
+                        ctx.arc(canvas.width / 2, canvas.height / 2, waveRadius, 0, Math.PI * 2);
+                        
+                        // Alternate colors between waves
+                        let waveColor;
+                        if (i % 3 === 0) {
+                            waveColor = 'rgba(255, 0, 255, ';
+                        } else if (i % 3 === 1) {
+                            waveColor = 'rgba(180, 0, 255, ';
+                        } else {
+                            waveColor = 'rgba(0, 255, 255, ';
+                        }
+                        
+                        // Fade out as wave expands
+                        const opacity = (1 - waveProgress) * 0.15 * collapseProgress;
+                        ctx.strokeStyle = waveColor + opacity + ')';
+                        ctx.lineWidth = 2 + (1 - waveProgress) * 5;
+                        ctx.stroke();
+                    }
+                }
+            }
+            
+            // Handle camera retreat
+            if (cameraRetreat.active) {
+                cameraRetreat.progress += deltaTime * 0.4;
+                
+                if (cameraRetreat.progress >= 1.0) {
+                    // Transition to scene 3
+                    setTimeout(() => {
+                        window.location.href = '/scene-three';
+                    }, 1000);
+                }
+                
+                // Make camera zoom out and rotate
+                cameraScale = cameraRetreat.startScale * (1 - cameraRetreat.progress * 0.8);
+                
+                // Add a shake effect
+                const shakeAmount = 0.05 * cameraRetreat.progress;
+                cameraOffset.x += (Math.random() - 0.5) * shakeAmount * canvas.width;
+                cameraOffset.y += (Math.random() - 0.5) * shakeAmount * canvas.height;
+                
+                // Apply a vignette effect for dramatic impact
+                const vignetteOpacity = cameraRetreat.progress * 0.8;
+                ctx.save();
+                const vignetteGradient = ctx.createRadialGradient(
+                    canvas.width / 2, canvas.height / 2, 0,
+                    canvas.width / 2, canvas.height / 2, canvas.width / 2
+                );
+                vignetteGradient.addColorStop(0, `rgba(0, 0, 0, 0)`);
+                vignetteGradient.addColorStop(0.7, `rgba(0, 0, 0, ${vignetteOpacity * 0.3})`);
+                vignetteGradient.addColorStop(1, `rgba(0, 0, 0, ${vignetteOpacity})`);
+                
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.fillStyle = vignetteGradient;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.restore();
+            }
+        }
+        
+        function drawHealthIndicator() {
+            // Create an artistic, abstract representation of ecosystem health
+            const barWidth = 8;
+            const barHeight = canvas.height * 0.6;
+            const barX = canvas.width - barWidth - 30;
+            const barY = (canvas.height - barHeight) / 2;
+            
+            ctx.save();
+            
+            // Draw background bar (semi-transparent)
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.fillRect(barX, barY, barWidth, barHeight);
+            
+            // Calculate health portion height
+            const healthHeight = barHeight * ecosystemHealth;
+            const damageHeight = barHeight - healthHeight;
+            
+            // Health gradient (blues/teals)
+            const healthGradient = ctx.createLinearGradient(
+                barX, barY + barHeight,
+                barX, barY + barHeight - healthHeight
+            );
+            healthGradient.addColorStop(0, `rgba(0, 180, 200, 0.8)`);
+            healthGradient.addColorStop(1, `rgba(0, 230, 255, 0.8)`);
+            
+            // Draw health portion
+            ctx.fillStyle = healthGradient;
+            ctx.fillRect(
+                barX, 
+                barY + damageHeight, 
+                barWidth, 
+                healthHeight
+            );
+            
+            // Damage gradient (ember/red)
+            const damageGradient = ctx.createLinearGradient(
+                barX, barY,
+                barX, barY + damageHeight
+            );
+            damageGradient.addColorStop(0, `rgba(255, 30, 0, 0.8)`);
+            damageGradient.addColorStop(1, `rgba(200, 40, 0, 0.8)`);
+            
+            // Draw damage portion
+            ctx.fillStyle = damageGradient;
+            ctx.fillRect(
+                barX, 
+                barY, 
+                barWidth, 
+                damageHeight
+            );
+            
+            // Add decorative elements
+            const numDots = 10;
+            for (let i = 0; i < numDots; i++) {
+                const dotY = barY + barHeight * (i / (numDots - 1));
+                const dotSize = 2;
+                const pulse = Math.sin(time * 2 + i * 0.5) * 0.5 + 1.5;
+                
+                // Determine if dot is in health or damage section
+                const isDamage = dotY < barY + damageHeight;
+                
+                // Glow effect
+                ctx.beginPath();
+                ctx.arc(barX - 10, dotY, dotSize * pulse, 0, Math.PI * 2);
+                
+                if (isDamage) {
+                    ctx.fillStyle = `rgba(255, 50, 0, ${0.7 * (pulse - 1)})`; 
+                } else {
+                    ctx.fillStyle = `rgba(0, 200, 255, ${0.7 * (pulse - 1)})`; 
+                }
+                
+                ctx.fill();
+                
+                // Solid dot
+                ctx.beginPath();
+                ctx.arc(barX - 10, dotY, dotSize, 0, Math.PI * 2);
+                
+                if (isDamage) {
+                    ctx.fillStyle = `rgba(255, 100, 50, 0.8)`; 
+                } else {
+                    ctx.fillStyle = `rgba(100, 220, 255, 0.8)`; 
+                }
+                
+                ctx.fill();
+            }
+            
+            // Critical threshold indicator (at 20% health)
+            ctx.fillStyle = isCollapsing ? `rgba(255, 0, 0, ${0.5 + Math.sin(time * 10) * 0.5})` : 'rgba(255, 0, 0, 0.4)';
+            const thresholdY = barY + barHeight * 0.8; // 20% from bottom (80% damage)
+            ctx.fillRect(barX - 5, thresholdY, barWidth + 10, 2);
+            
+            ctx.restore();
+        }
+        
         // Main animation loop
         function animate(currentTime) {
             // Calculate delta time for smooth animations
@@ -535,6 +1146,9 @@
             
             // Update camera orbit
             updateCameraOrbit();
+            
+            // Update ecosystem health
+            updateEcosystemHealth();
             
             // Clear canvas with a deep blue background gradient
             ctx.fillStyle = 'black';
@@ -574,8 +1188,16 @@
             // Restore original transformation
             ctx.restore();
             
+            // Draw devourer swarm effect (if collapsing)
+            updateAndDrawDevourerSwarm();
+            
             // Draw hand interaction (outside of camera transformation)
             drawHandInteraction();
+            
+            // Draw health indicator
+            if (!cameraRetreat.active) {
+                drawHealthIndicator();
+            }
             
             requestAnimationFrame(animate);
         }
@@ -597,6 +1219,11 @@
             // Gentle zoom in/out effect
             const targetScale = 1.0 + Math.sin(time * 0.1) * 0.05;
             cameraScale += (targetScale - cameraScale) * deltaTime;
+            
+            // Update world hand position when camera changes
+            if (handPosition) {
+                worldHandPosition = screenToWorldSpace(handPosition.x, handPosition.y);
+            }
         }
         
         function updateAndDrawDamagedAreas() {
@@ -1007,25 +1634,67 @@
         function drawHandInteraction() {
             if (!handPosition) return;
             
-            // Draw subtle glow around hand position
             ctx.save();
-            ctx.globalCompositeOperation = 'screen';
             
-            const pulse = Math.sin(time * 3) * 0.3 + 0.7;
-            const radius = 20 + pulse * 10;
+            // Pulse effect for interaction indicator
+            const pulse = 0.7 + Math.sin(time * 5) * 0.3;
             
+            // Draw interaction indicator
+            let radius = 15;
+            let color = colors.blue;
+            
+            if (isHolding) {
+                // For hold gesture, show expanding destructive radius
+                radius = 30 + holdDuration * 25;
+                radius = Math.min(radius, 120); // Cap the maximum radius
+                color = colors.ember;
+                
+                // Draw hold radius indicator
+                const radiusOpacity = 0.1 + pulse * 0.1;
+                
+                // Draw outer circle
+                ctx.beginPath();
+                ctx.arc(handPosition.x, handPosition.y, radius, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${radiusOpacity * 2})`;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                // Draw inner destructive area
+                const holdGradient = ctx.createRadialGradient(
+                    handPosition.x, handPosition.y, 0,
+                    handPosition.x, handPosition.y, radius
+                );
+                holdGradient.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, ${radiusOpacity * 1.5})`);
+                holdGradient.addColorStop(0.7, `rgba(${color.r}, ${color.g}, ${color.b}, ${radiusOpacity})`);
+                holdGradient.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
+                
+                ctx.fillStyle = holdGradient;
+                ctx.fill();
+            } else if (isClicking) {
+                // For click gesture, show creative/healing glow
+                radius = 20 + pulse * 10;
+                color = colors.teal;
+                
+                // Draw growing circular wave for click
+                ctx.beginPath();
+                ctx.arc(handPosition.x, handPosition.y, radius * 1.5, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${0.2 * pulse})`;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            
+                // Normal hover state
+                radius = 20 + pulse * 8;
+                color = colors.glow;
+            }
+            
+            // Draw the main interaction glow
             const gradient = ctx.createRadialGradient(
                 handPosition.x, handPosition.y, 0,
                 handPosition.x, handPosition.y, radius
             );
             
-            const interactionColor = isClicking ? colors.teal : colors.glow;
-            const r = interactionColor.r;
-            const g = interactionColor.g;
-            const b = interactionColor.b;
-            
-            gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${0.2 * pulse})`);
-            gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+            gradient.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, ${0.3 * pulse})`);
+            gradient.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
             
             ctx.fillStyle = gradient;
             ctx.beginPath();
@@ -1046,10 +1715,27 @@
                     // Draw with varied sizes based on point index
                     const pointSize = index % 4 === 0 ? 3 : 2;
                     
+                    // Highlight index finger tip (usually index 8)
+                    const isIndexTip = index === 8;
+                    const highlightSize = isIndexTip ? 2 : 1;
+                    
                     ctx.beginPath();
-                    ctx.arc(x, y, pointSize, 0, Math.PI * 2);
-                    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.5 * pulse})`;
+                    ctx.arc(x, y, pointSize * highlightSize, 0, Math.PI * 2);
+                    
+                    // Use gesture-specific colors for hand landmarks
+                    let pointColor = color;
+                    
+                    ctx.fillStyle = `rgba(${pointColor.r}, ${pointColor.g}, ${pointColor.b}, ${(isIndexTip ? 0.8 : 0.5) * pulse})`;
                     ctx.fill();
+                    
+                    // Draw a special indicator for the index finger
+                    if (isIndexTip) {
+                        ctx.beginPath();
+                        ctx.arc(x, y, pointSize * 3, 0, Math.PI * 2);
+                        ctx.strokeStyle = `rgba(${pointColor.r}, ${pointColor.g}, ${pointColor.b}, ${0.4 * pulse})`;
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                    }
                 });
                 
                 ctx.restore();

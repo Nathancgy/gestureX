@@ -206,25 +206,51 @@
 
         // Function to trigger the burst animation
         function triggerBurst() {
-            // Animate the burst over time
-            const burstAnimation = setInterval(() => {
-                burstProgress += 0.02;
+            // Initial zoom-out effect for dramatic transition
+            const initialZoom = { value: 1 };
+            const zoomDuration = 1500; // 1.5 seconds for zoom effect
+            const zoomStart = performance.now();
+            
+            const zoomEffect = () => {
+                const elapsed = performance.now() - zoomStart;
+                const progress = Math.min(elapsed / zoomDuration, 1);
                 
-                if (burstProgress >= 1) {
-                    clearInterval(burstAnimation);
-                    
-                    // After burst is complete, wait and then trigger transition
-                    setTimeout(() => {
-                        transitionTriggered = true;
-                        canvas.classList.add('falling');
-                        
-                        // Navigate to the next page after the transition animation
-                        setTimeout(() => {
-                            window.location.href = '/second-stage';
-                        }, 3000);
-                    }, 5000);
+                // Ease-out function for smooth deceleration
+                initialZoom.value = 1 + (0.3 * (1 - Math.pow(1 - progress, 3)));
+                
+                if (progress < 1) {
+                    requestAnimationFrame(zoomEffect);
+                } else {
+                    // Start the burst animation after zoom completes
+                    startBurstAnimation();
                 }
-            }, 50);
+            };
+            
+            // Start zoom effect
+            requestAnimationFrame(zoomEffect);
+            
+            // The actual burst animation
+            const startBurstAnimation = () => {
+                // Animate the burst over time
+                const burstAnimation = setInterval(() => {
+                    burstProgress += 0.02;
+                    
+                    if (burstProgress >= 1) {
+                        clearInterval(burstAnimation);
+                        
+                        // After burst is complete, wait and then trigger transition
+                        setTimeout(() => {
+                            transitionTriggered = true;
+                            canvas.classList.add('falling');
+                            
+                            // Navigate to the next page after the transition animation
+                            setTimeout(() => {
+                                window.location.href = '/second-stage';
+                            }, 3000);
+                        }, 4000);
+                    }
+                }, 50);
+            };
         }
 
         // Color utility functions
@@ -389,6 +415,11 @@
         
         // Draw a single vein
         function drawVein(startX, startY, angle, length, curve, width, progress) {
+            // Extend length if transition is triggered (lines growing to fill screen)
+            const finalLength = transitionTriggered ? 
+                length * (1 + Math.pow(burstProgress, 2) * 30) : 
+                length;
+                
             // Create a curved path for the vein
             ctx.beginPath();
             
@@ -396,33 +427,46 @@
             ctx.moveTo(startX, startY);
             
             // Create a curved path using quadratic curve
-            const endX = startX + Math.cos(angle) * length * progress;
-            const endY = startY + Math.sin(angle) * length * progress;
+            const endX = startX + Math.cos(angle) * finalLength * progress;
+            const endY = startY + Math.sin(angle) * finalLength * progress;
             
-            // Control point for curve
-            const midX = (startX + endX) / 2 - Math.sin(angle) * curve * length * progress;
-            const midY = (startY + endY) / 2 + Math.cos(angle) * curve * length * progress;
+            // Control point for curve - reduces curve as lines extend
+            const curveFactor = transitionTriggered ? 
+                curve * (1 - Math.pow(burstProgress, 2) * 0.9) : 
+                curve;
+                
+            const midX = (startX + endX) / 2 - Math.sin(angle) * curveFactor * finalLength * progress;
+            const midY = (startY + endY) / 2 + Math.cos(angle) * curveFactor * finalLength * progress;
             
             ctx.quadraticCurveTo(midX, midY, endX, endY);
             
-            // Create pulsing gold glow effect
-            ctx.shadowColor = getRGBA(dynamicColors.gold);
-            ctx.shadowBlur = 10;
+            // Create pulsing gold glow effect - intensifies during transition
+            ctx.shadowColor = getRGBA({
+                ...dynamicColors.gold,
+                a: dynamicColors.gold.a * (transitionTriggered ? 1.5 : 1)
+            });
+            ctx.shadowBlur = transitionTriggered ? 15 + burstProgress * 10 : 10;
             
             // Create gradient for the veins
             const gradient = ctx.createLinearGradient(startX, startY, endX, endY);
-            gradient.addColorStop(0, `rgba(255, 215, 0, ${0.8 * dynamicColors.gold.a})`);
+            const goldIntensity = transitionTriggered ? (0.8 + burstProgress * 0.2) : 0.8;
+            gradient.addColorStop(0, `rgba(255, 215, 0, ${goldIntensity * dynamicColors.gold.a})`);
             gradient.addColorStop(0.5, `rgba(255, 235, 120, ${0.6 * dynamicColors.gold.a})`);
             gradient.addColorStop(1, `rgba(255, 245, 200, ${0.4 * dynamicColors.gold.a})`);
             
             ctx.strokeStyle = gradient;
-            ctx.lineWidth = width * (1 - progress * 0.3); // Taper the vein
+            // Lines maintain thickness when extending during transition
+            const lineWidthFactor = transitionTriggered ? Math.min(1.0, 0.7 + burstProgress * 0.3) : (1 - progress * 0.3);
+            ctx.lineWidth = width * lineWidthFactor;
             ctx.lineCap = 'round';
             ctx.stroke();
             
+            // Increase particle generation during transition
+            const particleThreshold = transitionTriggered ? 0.4 : 0.6;
+            
             // Draw small particles along the vein for additional effect
-            if (Math.random() > 0.6 && progress > 0.2) {
-                const particleCount = Math.floor(progress * 3);
+            if (Math.random() > particleThreshold && progress > 0.2) {
+                const particleCount = Math.floor(progress * (transitionTriggered ? 5 : 3));
                 for (let i = 0; i < particleCount; i++) {
                     const t = Math.random();
                     const pX = startX + (endX - startX) * t;
@@ -432,8 +476,12 @@
                     const adjustedPX = pX + (midX - ((startX + endX) / 2)) * 4 * t * (1 - t);
                     const adjustedPY = pY + (midY - ((startY + endY) / 2)) * 4 * t * (1 - t);
                     
+                    const particleSize = transitionTriggered ? 
+                        Math.random() * 2 + 1 : 
+                        Math.random() * 1.5;
+                        
                     ctx.beginPath();
-                    ctx.arc(adjustedPX, adjustedPY, Math.random() * 1.5, 0, Math.PI * 2);
+                    ctx.arc(adjustedPX, adjustedPY, particleSize, 0, Math.PI * 2);
                     ctx.fillStyle = `rgba(255, 245, 220, ${Math.random() * 0.7 + 0.3})`;
                     ctx.fill();
                 }
@@ -443,20 +491,35 @@
         // Function to draw transition effect
         function drawTransition() {
             // Create a starless galaxy effect for transition
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.03)';
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
+            // Add subtle zoom effect
+            const zoomProgress = Math.min(1, burstProgress * 1.5);
+            const zoomScale = 1 + zoomProgress * 0.3;
+            
             // Add subtle dust particles
-            for (let i = 0; i < 5; i++) {
+            for (let i = 0; i < 10; i++) {
                 const x = Math.random() * canvas.width;
                 const y = Math.random() * canvas.height;
-                const size = Math.random() * 2;
+                const size = Math.random() * 3;
                 
                 ctx.beginPath();
                 ctx.arc(x, y, size, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.1})`;
+                ctx.fillStyle = `rgba(255, 245, 220, ${Math.random() * 0.15})`;
                 ctx.fill();
             }
+            
+            // Add a subtle vignette effect
+            const vignetteGradient = ctx.createRadialGradient(
+                canvas.width / 2, canvas.height / 2, 0,
+                canvas.width / 2, canvas.height / 2, canvas.width * 0.7
+            );
+            vignetteGradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+            vignetteGradient.addColorStop(1, `rgba(0, 0, 0, ${0.3 * burstProgress})`);
+            
+            ctx.fillStyle = vignetteGradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
         }
         
         // Function to draw progress segments around the shape
@@ -469,8 +532,15 @@
                 // Draw outer progress arc
                 ctx.beginPath();
                 ctx.arc(0, 0, baseSize * 1.6, 0, Math.PI * 2 * seedProgress);
-                ctx.strokeStyle = `rgba(255, 255, 255, ${0.2 + growthPulse * 0.3})`;
-                ctx.lineWidth = 1;
+                ctx.strokeStyle = `rgba(255, 255, 255, ${0.4 + growthPulse * 0.4})`;
+                ctx.lineWidth = 2 + growthPulse * 2;
+                ctx.stroke();
+                
+                // Add a glow effect to the progress arc
+                ctx.shadowColor = 'rgba(255, 255, 255, 0.7)';
+                ctx.shadowBlur = 8;
+                ctx.beginPath();
+                ctx.arc(0, 0, baseSize * 1.6, 0, Math.PI * 2 * seedProgress);
                 ctx.stroke();
                 
                 // Draw progress tendrils
@@ -496,19 +566,19 @@
                         
                         // Create gradient for tendril
                         const gradient = ctx.createLinearGradient(0, 0, endX, endY);
-                        gradient.addColorStop(0, `rgba(255, 255, 255, ${0.8 * pulseFactor * actualProgress})`);
+                        gradient.addColorStop(0, `rgba(255, 255, 255, ${0.9 * pulseFactor * actualProgress})`);
                         gradient.addColorStop(1, `rgba(255, 255, 255, 0)`);
                         
                         ctx.strokeStyle = gradient;
-                        ctx.lineWidth = 1 + growthPulse;
+                        ctx.lineWidth = 1.5 + growthPulse * 1.5;
                         ctx.lineCap = 'round';
                         ctx.stroke();
                         
                         // Add particles at the end of growing tendrils
-                        if (growthPulse > 0.5 && Math.random() > 0.85 && segment.progress > 0.3) {
+                        if (growthPulse > 0.3 && Math.random() > 0.8 && segment.progress > 0.3) {
                             ctx.beginPath();
-                            ctx.arc(endX, endY, 1 + Math.random() * 2, 0, Math.PI * 2);
-                            ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.5 + 0.3})`;
+                            ctx.arc(endX, endY, 1.5 + Math.random() * 2.5, 0, Math.PI * 2);
+                            ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.6 + 0.4})`;
                             ctx.fill();
                         }
                     }
