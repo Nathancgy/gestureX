@@ -16,6 +16,44 @@ PLUGIN USAGE:
 
 """
 import os
+import webbrowser
+import threading
+from flask import Flask, render_template
+from flask_socketio import SocketIO
+import json
+
+# Initialize Flask app
+app = Flask(__name__, template_folder='templates')
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Global variable to store hand landmarks
+hand_landmarks_data = None
+current_gesture = None
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/second-stage')
+def second_stage():
+    return render_template('second-stage.html')
+
+# WebSocket to send hand landmark data to the client
+@socketio.on('connect')
+def handle_connect():
+    print('Client connected')
+
+def send_landmarks():
+    global hand_landmarks_data, current_gesture
+    while True:
+        if hand_landmarks_data is not None:
+            socketio.emit('landmarks', json.dumps(hand_landmarks_data))
+        
+        # Send gesture data if available
+        if current_gesture is not None:
+            socketio.emit('gesture', current_gesture)
+            
+        socketio.sleep(0.05)  # 20 FPS update rate
 
 print("Loading Plugins ... ")
 
@@ -23,7 +61,7 @@ import csv
 import copy
 import argparse
 import itertools
-# 统计“可迭代序列”中每个元素的出现的次数
+# 统计"可迭代序列"中每个元素的出现的次数
 from collections import Counter
 # 实现了两端都可以操作的队列，相当于双端队列
 from collections import deque
@@ -77,7 +115,9 @@ def get_args():
 def main():
     print("Done.")  # opening plugins
 
-    global blackboard_fn, blackboard_fn_backup
+    global blackboard_fn, blackboard_fn_backup, hand_landmarks_data, current_gesture
+    hand_landmarks_data = None
+    current_gesture = None
 
     # 参数解析 #################################################################
     args = get_args()
@@ -187,6 +227,14 @@ def main():
                 # brect = calc_bounding_rect(debug_image, hand_landmarks)
                 # 计算手指坐标
                 landmark_list = calc_landmark_list(debug_image, hand_landmarks)
+                
+                # Update global hand landmarks for web interface
+                hand_landmarks_data = []
+                for point in landmark_list:
+                    hand_landmarks_data.append({
+                        'x': point[0] / debug_image.shape[1],  # Normalize to 0-1
+                        'y': point[1] / debug_image.shape[0]   # Normalize to 0-1
+                    })
 
                 # plugin
                 blackboard_fn(landmark_list[8])  # finger No.8
@@ -199,6 +247,10 @@ def main():
 
                 # 手势分类
                 hand_sign_id = keypoint_classifier(pre_processed_landmark_list)
+                
+                # Update current gesture for WebSocket
+                if hand_sign_id >= 0 and hand_sign_id < len(keypoint_classifier_labels):
+                    current_gesture = keypoint_classifier_labels[hand_sign_id]
 
                 # if(300 < landmark_list[8][0] < 1000 and 40 < landmark_list[8][1] < 400):
                 #    plugin.mouse.move_to(landmark_list[8])
@@ -581,5 +633,28 @@ def draw_info(image, fps, mode, number):
     return image
 
 
+def flask_thread():
+    socketio.run(app, debug=False, host='127.0.0.1', port=5000, use_reloader=False)
+
+
 if __name__ == '__main__':
+    # Start Flask in a background thread
+    web_thread = threading.Thread(target=flask_thread)
+    web_thread.daemon = True
+    web_thread.start()
+    
+    # Start landmark sending in a background thread
+    landmark_thread = threading.Thread(target=send_landmarks)
+    landmark_thread.daemon = True
+    landmark_thread.start()
+    
+    # Open web browser automatically
+    def open_browser():
+        webbrowser.open('http://127.0.0.1:5000/')
+    
+    browser_thread = threading.Timer(1.5, open_browser)
+    browser_thread.daemon = True
+    browser_thread.start()
+    
+    # Run the main program - this keeps the camera window as the main focus
     main()

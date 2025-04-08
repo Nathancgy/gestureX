@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GestureX - Alien Coral Reef</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: black;
+            font-family: 'Arial', sans-serif;
+            color: white;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        .content {
+            position: relative;
+            z-index: 2;
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            align-items: center;
+            pointer-events: none;
+        }
+        .instructions {
+            background-color: rgba(0, 0, 0, 0.5);
+            border-top: 1px solid rgba(0, 200, 200, 0.3);
+            width: 100%;
+            padding: 15px 0;
+            text-align: center;
+            opacity: 0;
+            animation: fade-in 3s ease-in forwards;
+            animation-delay: 3s;
+        }
+        @keyframes fade-in {
+            0% { opacity: 0; }
+            100% { opacity: 1; }
+        }
+        .instruction-text {
+            max-width: 800px;
+            margin: 0 auto;
+            font-size: 1rem;
+            line-height: 1.6;
+            color: rgba(200, 255, 255, 0.8);
+        }
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: black;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            opacity: 1;
+            transition: opacity 2s ease-out;
+        }
+        .loading.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .loading-text {
+            font-size: 2rem;
+            letter-spacing: 0.5rem;
+            color: rgba(0, 255, 255, 0.7);
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+<body>
+    <div class="loading" id="loadingScreen">
+        <div class="loading-text">Entering The Reef</div>
+    </div>
+    
+    <canvas id="reefCanvas"></canvas>
+    
+    <div class="content">
+        <div class="instructions">
+            <p class="instruction-text">Use the "Click" gesture to heal damaged areas and grow new coral structures. Hold your hand steady to focus on specific regions.</p>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        // Hide loading screen after 3 seconds
+        setTimeout(() => {
+            document.getElementById('loadingScreen').classList.add('hidden');
+        }, 3000);
+        
+        // Set up canvas
+        const canvas = document.getElementById('reefCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // Connect to the WebSocket server
+        const socket = io();
+        
+        // Hand landmark data and gesture state
+        let handLandmarks = null;
+        let currentGesture = '';
+        let lastGesture = '';
+        let handPosition = null;
+        let isClicking = false;
+        let isHolding = false;
+        let lastClickTime = 0;
+        let holdStartTime = 0;
+        let holdDuration = 0;
+        
+        // Camera and view transformation
+        let cameraOffset = { x: 0, y: 0 };
+        let cameraRotation = 0;
+        let cameraScale = 1.0;
+        let targetCameraRotation = 0;
+        let orbitSpeed = 0.05;
+        let orbitRadius = 50;
+        
+        // Animation timing
+        let time = 0;
+        let lastFrameTime = 0;
+        let deltaTime = 0;
+        
+        // Color palette
+        const colors = {
+            teal: { r: 0, g: 210, b: 210 },
+            darkTeal: { r: 0, g: 80, b: 100 },
+            blue: { r: 30, g: 100, b: 200 },
+            purple: { r: 100, g: 40, b: 150 },
+            ember: { r: 255, g: 50, b: 20 },
+            coral: { r: 255, g: 150, b: 150 },
+            glow: { r: 200, g: 255, b: 255 }
+        };
+        
+        // Coral reef structures
+        const coralSegments = [];
+        const tubes = [];
+        const nodes = [];
+        const particles = [];
+        const damagedAreas = [];
+        const maxParticles = 300;
+        
+        // Listen for landmarks and gesture data
+        socket.on('landmarks', function(data) {
+            handLandmarks = JSON.parse(data);
+            
+            if (handLandmarks && handLandmarks.length > 0) {
+                // Get index finger position (usually index 8)
+                const indexTip = handLandmarks[8] || handLandmarks[0];
+                handPosition = {
+                    x: indexTip.x * canvas.width,
+                    y: indexTip.y * canvas.height
+                };
+            }
+        });
+        
+        socket.on('gesture', function(data) {
+            lastGesture = currentGesture;
+            currentGesture = data;
+            
+            if (currentGesture === 'Click' && !isClicking) {
+                isClicking = true;
+                handleClick();
+            } else if (currentGesture !== 'Click' && isClicking) {
+                isClicking = false;
+            }
+            
+            // Handle Hold gesture
+            if (currentGesture === 'Hold' && !isHolding) {
+                isHolding = true;
+                holdStartTime = time;
+                holdDuration = 0;
+            } else if (currentGesture !== 'Hold' && isHolding) {
+                isHolding = false;
+                holdDuration = 0;
+            }
+            
+            // Update camera orbit based on gestures
+            if (currentGesture === 'Click' || currentGesture === 'Hold') {
+                // Slow down orbit during interactions
+                orbitSpeed = 0.01;
+            } else {
+                // Normal dreamy orbit
+                orbitSpeed = 0.05;
+            }
+        });
+        
+        // Initialize coral reef structures
+        function initReef() {
+            // Create main branch structures
+            const numBranches = 5 + Math.floor(Math.random() * 5);
+            
+            for (let i = 0; i < numBranches; i++) {
+                const centerX = canvas.width * (0.2 + Math.random() * 0.6);
+                const centerY = canvas.height * (0.2 + Math.random() * 0.6);
+                const branchLength = 100 + Math.random() * 200;
+                const angle = Math.random() * Math.PI * 2;
+                
+                createBranch(centerX, centerY, branchLength, angle, 3);
+            }
+            
+            // Add some randomly damaged areas
+            for (let i = 0; i < 8; i++) {
+                const x = canvas.width * Math.random();
+                const y = canvas.height * Math.random();
+                createDamagedArea(x, y, 30 + Math.random() * 50);
+            }
+        }
+        
+        function createBranch(startX, startY, length, angle, depth) {
+            if (depth <= 0) return;
+            
+            const endX = startX + Math.cos(angle) * length;
+            const endY = startY + Math.sin(angle) * length;
+            
+            // Create a tube
+            tubes.push({
+                startX, startY, endX, endY,
+                width: 5 + Math.random() * 10,
+                color: {...colors.teal},
+                alpha: 0.6 + Math.random() * 0.4,
+                swayPhase: Math.random() * Math.PI * 2,
+                swayAmount: 0.5 + Math.random() * 2,
+                pulsePhase: Math.random() * Math.PI * 2,
+                health: 0.7 + Math.random() * 0.3,
+                segments: Math.floor(length / 15)
+            });
+            
+            // Add a node at the end
+            nodes.push({
+                x: endX, y: endY,
+                size: 8 + Math.random() * 12,
+                color: Math.random() > 0.5 ? {...colors.teal} : {...colors.blue},
+                alpha: 0.8,
+                glowAmount: 0.5 + Math.random() * 0.5,
+                pulsePhase: Math.random() * Math.PI * 2,
+                health: 0.7 + Math.random() * 0.3,
+                bloomProgress: 0,
+                isBlossoming: false
+            });
+            
+            // Create sub-branches
+            if (depth > 1) {
+                const numBranches = 1 + Math.floor(Math.random() * 3);
+                
+                for (let i = 0; i < numBranches; i++) {
+                    const branchAngle = angle + (Math.random() - 0.5) * Math.PI * 0.8;
+                    const branchLength = length * (0.4 + Math.random() * 0.3);
+                    createBranch(endX, endY, branchLength, branchAngle, depth - 1);
+                }
+            }
+        }
+        
+        function createDamagedArea(x, y, size) {
+            damagedAreas.push({
+                x, y, size,
+                embers: [],
+                alpha: 0.7 + Math.random() * 0.3,
+                pulsePhase: Math.random() * Math.PI * 2,
+                rippleProgress: 0,
+                healing: false,
+                healProgress: 0
+            });
+            
+            // Create ember particles inside the damaged area
+            const numEmbers = 5 + Math.floor(Math.random() * 10);
+            for (let i = 0; i < numEmbers; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const distance = Math.random() * size * 0.7;
+                damagedAreas[damagedAreas.length - 1].embers.push({
+                    x: x + Math.cos(angle) * distance,
+                    y: y + Math.sin(angle) * distance,
+                    size: 1 + Math.random() * 3,
+                    alpha: 0.5 + Math.random() * 0.5,
+                    pulsePhase: Math.random() * Math.PI * 2
+                });
+            }
+        }
+        
+        // Handle click gesture
+        function handleClick() {
+            if (!handPosition) return;
+            
+            const now = performance.now();
+            if (now - lastClickTime < 200) return; // Throttle clicks
+            lastClickTime = now;
+            
+            // Check for interaction with damaged areas
+            for (let area of damagedAreas) {
+                const dx = area.x - handPosition.x;
+                const dy = area.y - handPosition.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < area.size && !area.healing) {
+                    // Start healing this area
+                    area.healing = true;
+                    area.healProgress = 0;
+                    
+                    // Create healing particles
+                    for (let i = 0; i < 20; i++) {
+                        createParticle(
+                            handPosition.x, 
+                            handPosition.y, 
+                            colors.glow, 
+                            5 + Math.random() * 5
+                        );
+                    }
+                    return;
+                }
+            }
+            
+            // Check for interaction with nodes for blossoming
+            let closestNode = null;
+            let closestDistance = Infinity;
+            
+            for (let node of nodes) {
+                const dx = node.x - handPosition.x;
+                const dy = node.y - handPosition.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < node.size * 3 && distance < closestDistance) {
+                    closestNode = node;
+                    closestDistance = distance;
+                }
+            }
+            
+            // Start blossoming the closest node if found
+            if (closestNode && !closestNode.isBlossoming) {
+                closestNode.isBlossoming = true;
+                closestNode.bloomProgress = 0;
+                
+                // Create enhanced blossoming particles
+                for (let i = 0; i < 25; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const distance = closestNode.size * (0.5 + Math.random() * 1.5);
+                    const x = closestNode.x + Math.cos(angle) * distance;
+                    const y = closestNode.y + Math.sin(angle) * distance;
+                    
+                    createParticle(
+                        x, y,
+                        {...closestNode.color},
+                        3 + Math.random() * 5
+                    );
+                }
+                return;
+            }
+            
+            // If not interacting with existing structures, create a new small branch
+            if (Math.random() > 0.5) {
+                createBranch(
+                    handPosition.x, 
+                    handPosition.y, 
+                    50 + Math.random() * 50, 
+                    Math.random() * Math.PI * 2, 
+                    2
+                );
+                
+                // Create particle burst
+                for (let i = 0; i < 10; i++) {
+                    createParticle(
+                        handPosition.x, 
+                        handPosition.y, 
+                        {...colors.teal}, 
+                        2 + Math.random() * 3
+                    );
+                }
+            }
+        }
+        
+        // Handle hold gesture for crumbling effect
+        function handleHold() {
+            if (!handPosition) return;
+            
+            // Find tubes near the hold position
+            const crumbleRadius = 30 + holdDuration * 20; // Radius increases the longer we hold
+            const maxRadius = 100; // Cap the maximum crumble radius
+            
+            // Find tubes to crumble
+            for (let i = tubes.length - 1; i >= 0; i--) {
+                const tube = tubes[i];
+                
+                // Check if any point on the tube is near the hand position
+                // We use a simplified approach by checking several points along the tube
+                const steps = 5;
+                let shouldCrumble = false;
+                
+                for (let step = 0; step <= steps; step++) {
+                    const t = step / steps;
+                    const midX = (tube.startX + tube.endX) / 2 + Math.cos(tube.swayPhase) * tube.swayAmount;
+                    const midY = (tube.startY + tube.endY) / 2 + Math.sin(tube.swayPhase) * tube.swayAmount;
+                    
+                    // Quadratic Bezier curve point
+                    const x = (1-t)*(1-t)*tube.startX + 2*(1-t)*t*midX + t*t*tube.endX;
+                    const y = (1-t)*(1-t)*tube.startY + 2*(1-t)*t*midY + t*t*tube.endY;
+                    
+                    const dx = x - handPosition.x;
+                    const dy = y - handPosition.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (distance < Math.min(crumbleRadius, maxRadius)) {
+                        shouldCrumble = true;
+                        break;
+                    }
+                }
+                
+                if (shouldCrumble) {
+                    // Create a damaged area at the tube's midpoint
+                    const midX = (tube.startX + tube.endX) / 2;
+                    const midY = (tube.startY + tube.endY) / 2;
+                    
+                    // Create damaged area
+                    createDamagedArea(midX, midY, 20 + Math.random() * 30);
+                    
+                    // Create ash particles for the crumbling effect
+                    for (let k = 0; k < 15; k++) {
+                        const t = Math.random();
+                        const midX = (tube.startX + tube.endX) / 2 + Math.cos(tube.swayPhase) * tube.swayAmount;
+                        const midY = (tube.startY + tube.endY) / 2 + Math.sin(tube.swayPhase) * tube.swayAmount;
+                        
+                        const x = (1-t)*(1-t)*tube.startX + 2*(1-t)*t*midX + t*t*tube.endX;
+                        const y = (1-t)*(1-t)*tube.startY + 2*(1-t)*t*midY + t*t*tube.endY;
+                        
+                        // Create ash particle (dark with ember hints)
+                        createAshParticle(x, y);
+                    }
+                    
+                    // Remove the tube
+                    tubes.splice(i, 1);
+                    
+                    // Also check if we need to remove associated nodes
+                    for (let j = nodes.length - 1; j >= 0; j--) {
+                        const node = nodes[j];
+                        const dx = node.x - midX;
+                        const dy = node.y - midY;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+                        
+                        if (distance < 30) {
+                            nodes.splice(j, 1);
+                            // Create ember particles for node destruction
+                            for (let k = 0; k < 20; k++) {
+                                createAshParticle(node.x, node.y);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Create ash particles for crumbling effect
+        function createAshParticle(x, y) {
+            const emberChance = Math.random();
+            const color = emberChance > 0.7 ? {...colors.ember} : { r: 40, g: 40, b: 40 };
+            const size = emberChance > 0.7 ? 2 + Math.random() * 2 : 1 + Math.random() * 3;
+            
+            particles.push({
+                x, y,
+                vx: (Math.random() - 0.5) * 1.5,
+                vy: Math.random() * 2 + 1, // Ash falls downward
+                size,
+                color,
+                alpha: 0.6 + Math.random() * 0.4,
+                life: 1.0,
+                decay: 0.01 + Math.random() * 0.02,
+                isAsh: true
+            });
+            
+            // Limit max particles
+            if (particles.length > maxParticles) {
+                particles.shift();
+            }
+        }
+        
+        // Create a particle effect
+        function createParticle(x, y, color, size) {
+            particles.push({
+                x, y,
+                vx: (Math.random() - 0.5) * 2,
+                vy: (Math.random() - 0.5) * 2,
+                size: size || 2 + Math.random() * 3,
+                color: {...color},
+                alpha: 0.7 + Math.random() * 0.3,
+                life: 1.0,
+                decay: 0.01 + Math.random() * 0.03
+            });
+            
+            // Limit max particles
+            if (particles.length > maxParticles) {
+                particles.shift();
+            }
+        }
+        
+        function resetReef() {
+            tubes.length = 0;
+            nodes.length = 0;
+            particles.length = 0;
+            damagedAreas.length = 0;
+            coralSegments.length = 0;
+            
+            initReef();
+        }
+        
+        // Main animation loop
+        function animate(currentTime) {
+            // Calculate delta time for smooth animations
+            if (!lastFrameTime) lastFrameTime = currentTime;
+            deltaTime = (currentTime - lastFrameTime) / 1000;
+            lastFrameTime = currentTime;
+            
+            // Cap delta time to avoid large jumps
+            if (deltaTime > 0.1) deltaTime = 0.1;
+            
+            // Update time for animations
+            time += deltaTime;
+            
+            // Update hold duration if holding
+            if (isHolding && handPosition) {
+                holdDuration += deltaTime;
+                if (holdDuration > 0.5) {
+                    // Create crumbling effect after 0.5 seconds of holding
+                    handleHold();
+                }
+            }
+            
+            // Update camera orbit
+            updateCameraOrbit();
+            
+            // Clear canvas with a deep blue background gradient
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw background glow
+            const gradient = ctx.createRadialGradient(
+                canvas.width * 0.5, canvas.height * 0.5, 10,
+                canvas.width * 0.5, canvas.height * 0.5, canvas.width * 0.8
+            );
+            gradient.addColorStop(0, 'rgba(0, 40, 60, 0.6)');
+            gradient.addColorStop(1, 'rgba(0, 0, 10, 0)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Apply camera transformations
+            ctx.save();
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            ctx.translate(centerX + cameraOffset.x, centerY + cameraOffset.y);
+            ctx.rotate(cameraRotation);
+            ctx.scale(cameraScale, cameraScale);
+            ctx.translate(-centerX, -centerY);
+            
+            // Update and draw damaged areas
+            updateAndDrawDamagedAreas();
+            
+            // Update and draw tubes
+            updateAndDrawTubes();
+            
+            // Update and draw nodes
+            updateAndDrawNodes();
+            
+            // Update and draw particles
+            updateAndDrawParticles();
+            
+            // Restore original transformation
+            ctx.restore();
+            
+            // Draw hand interaction (outside of camera transformation)
+            drawHandInteraction();
+            
+            requestAnimationFrame(animate);
+        }
+        
+        // Update camera orbit effect
+        function updateCameraOrbit() {
+            // Smoothly orbit around the center
+            targetCameraRotation += deltaTime * orbitSpeed;
+            cameraRotation += (targetCameraRotation - cameraRotation) * deltaTime * 0.5;
+            
+            // Calculate camera offset for dreamy movement
+            const orbitX = Math.sin(time * 0.2) * orbitRadius;
+            const orbitY = Math.cos(time * 0.15) * orbitRadius * 0.7;
+            
+            // Smoothly update camera position
+            cameraOffset.x += (orbitX - cameraOffset.x) * deltaTime;
+            cameraOffset.y += (orbitY - cameraOffset.y) * deltaTime;
+            
+            // Gentle zoom in/out effect
+            const targetScale = 1.0 + Math.sin(time * 0.1) * 0.05;
+            cameraScale += (targetScale - cameraScale) * deltaTime;
+        }
+        
+        function updateAndDrawDamagedAreas() {
+            for (let i = damagedAreas.length - 1; i >= 0; i--) {
+                const area = damagedAreas[i];
+                
+                if (area.healing) {
+                    // Update healing progress
+                    area.healProgress += deltaTime * 0.3;
+                    
+                    if (area.healProgress >= 1) {
+                        // Create a new healthy branch to replace the damaged area
+                        createBranch(
+                            area.x, 
+                            area.y, 
+                            40 + Math.random() * 60, 
+                            Math.random() * Math.PI * 2, 
+                            2
+                        );
+                        
+                        // Remove this damaged area
+                        damagedAreas.splice(i, 1);
+                        continue;
+                    }
+                }
+                
+                // Draw the dark hole
+                const pulseValue = Math.sin(time * 2 + area.pulsePhase) * 0.2 + 0.8;
+                const alpha = area.healing ? area.alpha * (1 - area.healProgress) : area.alpha;
+                
+                ctx.save();
+                ctx.globalCompositeOperation = 'destination-out';
+                const gradient = ctx.createRadialGradient(
+                    area.x, area.y, 0,
+                    area.x, area.y, area.size
+                );
+                gradient.addColorStop(0, `rgba(0, 0, 0, ${alpha * pulseValue})`);
+                gradient.addColorStop(0.7, `rgba(0, 0, 0, ${alpha * 0.7 * pulseValue})`);
+                gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(area.x, area.y, area.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+                
+                // Draw jagged edges with embers
+                ctx.save();
+                ctx.strokeStyle = `rgba(${colors.ember.r}, ${colors.ember.g}, ${colors.ember.b}, ${alpha * 0.7})`;
+                ctx.lineWidth = 1;
+                
+                ctx.beginPath();
+                for (let j = 0; j < 20; j++) {
+                    const angle = j * Math.PI * 2 / 20;
+                    const wobble = Math.sin(time * 3 + j * 0.7) * 5;
+                    const radius = area.size + wobble;
+                    const x = area.x + Math.cos(angle) * radius;
+                    const y = area.y + Math.sin(angle) * radius;
+                    
+                    if (j === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.closePath();
+                ctx.stroke();
+                ctx.restore();
+                
+                // Draw ember particles
+                for (let ember of area.embers) {
+                    const emberPulse = Math.sin(time * 4 + ember.pulsePhase) * 0.3 + 0.7;
+                    const emberAlpha = area.healing ? ember.alpha * (1 - area.healProgress) : ember.alpha;
+                    
+                    // Move embers slightly
+                    ember.x += Math.sin(time * 2 + ember.x) * 0.5 * deltaTime;
+                    ember.y += Math.cos(time * 2 + ember.y) * 0.5 * deltaTime;
+                    
+                    // Draw ember
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'screen';
+                    const emberGlow = ctx.createRadialGradient(
+                        ember.x, ember.y, 0,
+                        ember.x, ember.y, ember.size * 2
+                    );
+                    emberGlow.addColorStop(0, `rgba(${colors.ember.r}, ${colors.ember.g}, ${colors.ember.b}, ${emberAlpha * emberPulse})`);
+                    emberGlow.addColorStop(1, 'rgba(255, 50, 0, 0)');
+                    
+                    ctx.fillStyle = emberGlow;
+                    ctx.beginPath();
+                    ctx.arc(ember.x, ember.y, ember.size * 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                }
+                
+                // Draw ripple effect during healing
+                if (area.healing) {
+                    ctx.save();
+                    ctx.strokeStyle = `rgba(${colors.teal.r}, ${colors.teal.g}, ${colors.teal.b}, ${0.5 * area.healProgress})`;
+                    ctx.lineWidth = 2;
+                    
+                    const rippleSize = area.size * (1 + area.healProgress * 0.5);
+                    ctx.beginPath();
+                    ctx.arc(area.x, area.y, rippleSize, 0, Math.PI * 2);
+                    ctx.stroke();
+                    
+                    // Draw healing particles
+                    if (Math.random() > 0.7) {
+                        const angle = Math.random() * Math.PI * 2;
+                        const distance = Math.random() * area.size;
+                        createParticle(
+                            area.x + Math.cos(angle) * distance,
+                            area.y + Math.sin(angle) * distance,
+                            colors.teal,
+                            1 + Math.random() * 2
+                        );
+                    }
+                    
+                    ctx.restore();
+                }
+            }
+        }
+        
+        function updateAndDrawTubes() {
+            for (let tube of tubes) {
+                // Calculate sway effect
+                const sway = Math.sin(time * 0.8 + tube.swayPhase) * tube.swayAmount;
+                const midX = (tube.startX + tube.endX) / 2 + Math.cos(tube.swayPhase) * sway;
+                const midY = (tube.startY + tube.endY) / 2 + Math.sin(tube.swayPhase) * sway;
+                
+                // Calculate pulse effect
+                const pulse = Math.sin(time * 1.5 + tube.pulsePhase) * 0.2 + 0.8;
+                
+                // Draw translucent tube with curved path
+                ctx.save();
+                ctx.globalCompositeOperation = 'screen';
+                
+                // Create path for the tube
+                ctx.beginPath();
+                ctx.moveTo(tube.startX, tube.startY);
+                ctx.quadraticCurveTo(midX, midY, tube.endX, tube.endY);
+                
+                // Create gradient along the tube
+                const gradient = ctx.createLinearGradient(
+                    tube.startX, tube.startY,
+                    tube.endX, tube.endY
+                );
+                
+                const r = tube.color.r;
+                const g = tube.color.g;
+                const b = tube.color.b;
+                
+                gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${tube.alpha * pulse * 0.7})`);
+                gradient.addColorStop(0.5, `rgba(${r * 1.2}, ${g * 1.2}, ${b * 1.2}, ${tube.alpha * pulse})`);
+                gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, ${tube.alpha * pulse * 0.7})`);
+                
+                ctx.strokeStyle = gradient;
+                ctx.lineWidth = tube.width * pulse * tube.health;
+                ctx.lineCap = 'round';
+                ctx.stroke();
+                
+                // Draw translucent glow around the tube
+                ctx.globalCompositeOperation = 'screen';
+                ctx.shadowColor = `rgba(${r}, ${g}, ${b}, ${0.5 * pulse})`;
+                ctx.shadowBlur = 10 * tube.health;
+                ctx.lineWidth = tube.width * 0.5 * pulse * tube.health;
+                ctx.stroke();
+                
+                ctx.restore();
+                
+                // Occasionally emit particles along the tube
+                if (Math.random() > 0.95) {
+                    const t = Math.random();
+                    const curveX = (1 - t) * (1 - t) * tube.startX + 2 * (1 - t) * t * midX + t * t * tube.endX;
+                    const curveY = (1 - t) * (1 - t) * tube.startY + 2 * (1 - t) * t * midY + t * t * tube.endY;
+                    
+                    createParticle(
+                        curveX, curveY,
+                        tube.color,
+                        1 + Math.random() * 2
+                    );
+                }
+            }
+        }
+        
+        function updateAndDrawNodes() {
+            for (let node of nodes) {
+                // Update blossoming progress
+                if (node.isBlossoming) {
+                    node.bloomProgress += deltaTime * 0.4;
+                    
+                    // When fully blossomed, create new branches
+                    if (node.bloomProgress >= 1) {
+                        node.isBlossoming = false;
+                        node.bloomProgress = 0;
+                        node.size *= 1.2; // Grow the node
+                        
+                        // Create new branches from this node (flower-like)
+                        const numBranches = 3 + Math.floor(Math.random() * 3);
+                        const baseAngle = Math.random() * Math.PI * 2;
+                        for (let i = 0; i < numBranches; i++) {
+                            const angle = baseAngle + (i / numBranches) * Math.PI * 2;
+                            createBranch(
+                                node.x, node.y,
+                                20 + Math.random() * 30,
+                                angle,
+                                2
+                            );
+                        }
+                    }
+                }
+                
+                // Calculate pulse effect
+                const pulse = Math.sin(time * 1.2 + node.pulsePhase) * 0.3 + 0.7;
+                const bloomEffect = node.isBlossoming ? node.bloomProgress : 0;
+                
+                // Draw the node glow
+                ctx.save();
+                ctx.globalCompositeOperation = 'screen';
+                
+                const r = node.color.r;
+                const g = node.color.g;
+                const b = node.color.b;
+                
+                // Bloom effect modifies the color toward white
+                const bloomR = r + (255 - r) * bloomEffect;
+                const bloomG = g + (255 - g) * bloomEffect;
+                const bloomB = b + (255 - b) * bloomEffect;
+                
+                const glowSize = node.size * (1 + node.glowAmount * pulse + bloomEffect);
+                
+                // Create radial gradient for the glow
+                const gradient = ctx.createRadialGradient(
+                    node.x, node.y, 0,
+                    node.x, node.y, glowSize * 2
+                );
+                
+                gradient.addColorStop(0, `rgba(${bloomR}, ${bloomG}, ${bloomB}, ${node.alpha * pulse})`);
+                gradient.addColorStop(0.5, `rgba(${bloomR * 0.8}, ${bloomG * 0.8}, ${bloomB * 0.8}, ${node.alpha * pulse * 0.5})`);
+                gradient.addColorStop(1, `rgba(${bloomR * 0.6}, ${bloomG * 0.6}, ${bloomB * 0.6}, 0)`);
+                
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, glowSize * 2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Draw the inner node
+                gradient.addColorStop(0, `rgba(${bloomR}, ${bloomG}, ${bloomB}, ${node.alpha})`);
+                gradient.addColorStop(1, `rgba(${bloomR * 0.8}, ${bloomG * 0.8}, ${bloomB * 0.8}, 0)`);
+                
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, node.size * (1 + bloomEffect * 0.5), 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.restore();
+                
+                // Draw blossoming effect (flower-like)
+                if (node.isBlossoming) {
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'screen';
+                    
+                    // Draw flower petals
+                    const numPetals = 5 + Math.floor(bloomEffect * 3);
+                    for (let i = 0; i < numPetals; i++) {
+                        const angle = (i / numPetals) * Math.PI * 2 + time * 0.5;
+                        const length = node.size * 3 * bloomEffect;
+                        
+                        const petalWidth = node.size * 0.7 * bloomEffect;
+                        const controlDist = length * 0.5;
+                        
+                        // Calculate petal points
+                        const startX = node.x;
+                        const startY = node.y;
+                        const endX = node.x + Math.cos(angle) * length;
+                        const endY = node.y + Math.sin(angle) * length;
+                        
+                        const ctrl1X = node.x + Math.cos(angle - 0.3) * controlDist;
+                        const ctrl1Y = node.y + Math.sin(angle - 0.3) * controlDist;
+                        const ctrl2X = node.x + Math.cos(angle + 0.3) * controlDist;
+                        const ctrl2Y = node.y + Math.sin(angle + 0.3) * controlDist;
+                        
+                        // Draw petal
+                        const petalGradient = ctx.createRadialGradient(
+                            node.x, node.y, 0,
+                            node.x, node.y, length
+                        );
+                        
+                        petalGradient.addColorStop(0, `rgba(${bloomR}, ${bloomG}, ${bloomB}, ${0.8 * node.bloomProgress})`);
+                        petalGradient.addColorStop(0.7, `rgba(${bloomR * 0.8}, ${bloomG * 0.8}, ${bloomB * 0.8}, ${0.4 * node.bloomProgress})`);
+                        petalGradient.addColorStop(1, `rgba(${bloomR * 0.7}, ${bloomG * 0.7}, ${bloomB * 0.7}, 0)`);
+                        
+                        ctx.fillStyle = petalGradient;
+                        
+                        // Draw petal using bezier curves for a more organic shape
+                        ctx.beginPath();
+                        ctx.moveTo(startX, startY);
+                        ctx.bezierCurveTo(
+                            ctrl1X, ctrl1Y,
+                            endX - Math.cos(angle + Math.PI/2) * petalWidth,
+                            endY - Math.sin(angle + Math.PI/2) * petalWidth,
+                            endX, endY
+                        );
+                        ctx.bezierCurveTo(
+                            endX + Math.cos(angle + Math.PI/2) * petalWidth,
+                            endY + Math.sin(angle + Math.PI/2) * petalWidth,
+                            ctrl2X, ctrl2Y,
+                            startX, startY
+                        );
+                        ctx.fill();
+                    }
+                    
+                    // Draw light rays
+                    const numRays = 8;
+                    for (let i = 0; i < numRays; i++) {
+                        const angle = (i / numRays) * Math.PI * 2 + time * 0.5;
+                        const length = node.size * 4 * node.bloomProgress;
+                        
+                        const endX = node.x + Math.cos(angle) * length;
+                        const endY = node.y + Math.sin(angle) * length;
+                        
+                        const rayGradient = ctx.createLinearGradient(
+                            node.x, node.y,
+                            endX, endY
+                        );
+                        
+                        rayGradient.addColorStop(0, `rgba(${bloomR}, ${bloomG}, ${bloomB}, ${0.7 * node.bloomProgress})`);
+                        rayGradient.addColorStop(1, `rgba(${bloomR}, ${bloomG}, ${bloomB}, 0)`);
+                        
+                        ctx.strokeStyle = rayGradient;
+                        ctx.lineWidth = 2 * node.bloomProgress;
+                        
+                        ctx.beginPath();
+                        ctx.moveTo(node.x, node.y);
+                        ctx.lineTo(endX, endY);
+                        ctx.stroke();
+                    }
+                    
+                    // Occasionally emit particles during blooming
+                    if (Math.random() > 0.7) {
+                        const angle = Math.random() * Math.PI * 2;
+                        const distance = node.size * (0.5 + node.bloomProgress * 1.5);
+                        
+                        createParticle(
+                            node.x + Math.cos(angle) * distance,
+                            node.y + Math.sin(angle) * distance,
+                            node.color,
+                            1 + Math.random() * 3
+                        );
+                    }
+                    
+                    ctx.restore();
+                }
+            }
+        }
+        
+        function updateAndDrawParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const particle = particles[i];
+                
+                // Update particle position and life
+                particle.x += particle.vx;
+                particle.y += particle.vy;
+                particle.life -= particle.decay * deltaTime;
+                
+                // Remove dead particles
+                if (particle.life <= 0) {
+                    particles.splice(i, 1);
+                    continue;
+                }
+                
+                // Slow down particles
+                particle.vx *= 0.98;
+                particle.vy *= particle.isAsh ? 0.99 : 0.98; // Ash falls more steadily
+                
+                // If it's ash, add some additional gravity
+                if (particle.isAsh) {
+                    particle.vy += 0.05 * deltaTime;
+                }
+                
+                // Draw particle
+                ctx.save();
+                ctx.globalCompositeOperation = particle.isAsh ? 'source-over' : 'screen';
+                
+                const r = particle.color.r;
+                const g = particle.color.g;
+                const b = particle.color.b;
+                const alpha = particle.alpha * particle.life;
+                
+                // Create glow effect
+                const gradient = ctx.createRadialGradient(
+                    particle.x, particle.y, 0,
+                    particle.x, particle.y, particle.size * 2
+                );
+                
+                gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha})`);
+                gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+                
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(particle.x, particle.y, particle.size * 2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.restore();
+            }
+        }
+        
+        function drawHandInteraction() {
+            if (!handPosition) return;
+            
+            // Draw subtle glow around hand position
+            ctx.save();
+            ctx.globalCompositeOperation = 'screen';
+            
+            const pulse = Math.sin(time * 3) * 0.3 + 0.7;
+            const radius = 20 + pulse * 10;
+            
+            const gradient = ctx.createRadialGradient(
+                handPosition.x, handPosition.y, 0,
+                handPosition.x, handPosition.y, radius
+            );
+            
+            const interactionColor = isClicking ? colors.teal : colors.glow;
+            const r = interactionColor.r;
+            const g = interactionColor.g;
+            const b = interactionColor.b;
+            
+            gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${0.2 * pulse})`);
+            gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+            
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(handPosition.x, handPosition.y, radius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.restore();
+            
+            // Draw hand landmarks if available
+            if (handLandmarks && handLandmarks.length > 0) {
+                ctx.save();
+                ctx.globalCompositeOperation = 'screen';
+                
+                handLandmarks.forEach((point, index) => {
+                    const x = point.x * canvas.width;
+                    const y = point.y * canvas.height;
+                    
+                    // Draw with varied sizes based on point index
+                    const pointSize = index % 4 === 0 ? 3 : 2;
+                    
+                    ctx.beginPath();
+                    ctx.arc(x, y, pointSize, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.5 * pulse})`;
+                    ctx.fill();
+                });
+                
+                ctx.restore();
+            }
+        }
+        
+        // Handle window resize
+        window.addEventListener('resize', function() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            resetReef();
+        });
+        
+        // Add keyboard controls for testing
+        document.addEventListener('keydown', function(event) {
+            // 'c' key to create a damaged area at a random position
+            if (event.key === 'c') {
+                createDamagedArea(
+                    Math.random() * canvas.width,
+                    Math.random() * canvas.height,
+                    30 + Math.random() * 50
+                );
+            }
+            
+            // 'b' key to create a new branch
+            if (event.key === 'b') {
+                createBranch(
+                    Math.random() * canvas.width,
+                    Math.random() * canvas.height,
+                    50 + Math.random() * 100,
+                    Math.random() * Math.PI * 2,
+                    3
+                );
+            }
+            
+            // 'h' key to simulate a click/healing at the current hand position
+            if (event.key === 'h' && handPosition) {
+                handleClick();
+            }
+            
+            // 'd' key to simulate a hold/crumble at the current hand position
+            if (event.key === 'd' && handPosition) {
+                isHolding = true;
+                holdStartTime = time;
+                holdDuration = 0.6; // Start with some duration already
+                handleHold();
+            }
+            
+            // 'o' key to toggle camera orbit
+            if (event.key === 'o') {
+                orbitSpeed = orbitSpeed > 0.01 ? 0 : 0.05;
+            }
+        });
+        
+        document.addEventListener('keyup', function(event) {
+            // Release hold when 'd' key is released
+            if (event.key === 'd') {
+                isHolding = false;
+                holdDuration = 0;
+            }
+        });
+        
+        // Initialize and start animation
+        function init() {
+            initReef();
+            animate(0);
+        }
+        
+        init();
+    </script>
+</body>
+</html> 

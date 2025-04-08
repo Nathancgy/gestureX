@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GestureX - Geometric Void</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: black;
+            font-family: 'Arial', sans-serif;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        .hidden {
+            display: none;
+        }
+        @keyframes fall-transition {
+            0% {
+                transform: translateY(0);
+                opacity: 1;
+            }
+            100% {
+                transform: translateY(100vh);
+                opacity: 0;
+            }
+        }
+        .falling {
+            animation: fall-transition 3s cubic-bezier(0.55, 0.085, 0.68, 0.53) forwards;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="handCanvas"></canvas>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        // Set up canvas
+        const canvas = document.getElementById('handCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // Connect to the WebSocket server
+        const socket = io();
+
+        // Variables for the geometric shape
+        let time = 0;
+        const center = {
+            x: canvas.width / 2,
+            y: canvas.height / 2
+        };
+        
+        // Geometry configuration
+        const baseSize = Math.min(canvas.width, canvas.height) * 0.18;
+        let rotation = 0;
+        let breathingScale = 1;
+        
+        // Color scheme with animation
+        const colors = {
+            primary: {r: 255, g: 255, b: 255, a: 0.9},
+            secondary: {r: 200, g: 230, b: 255, a: 0.7},
+            tertiary: {r: 170, g: 215, b: 255, a: 0.4},
+            glow: {r: 135, g: 206, b: 250, a: 0.6},
+            gold: {r: 255, g: 215, b: 0, a: 0.7}
+        };
+        
+        // Dynamic color values
+        let dynamicColors = {
+            primary: {...colors.primary},
+            secondary: {...colors.secondary},
+            tertiary: {...colors.tertiary},
+            glow: {...colors.glow},
+            gold: {...colors.gold}
+        };
+        
+        // Hand landmark data and gesture state
+        let handLandmarks = null;
+        let lastGesture = '';
+        let currentGesture = '';
+        let burstTriggered = false;
+        let burstProgress = 0;
+        let transitionTriggered = false;
+        
+        // Progress state for growing the seed
+        let seedProgress = 0;
+        let lastClickTime = 0;
+        let growthPulse = 0;
+        let progressSegments = [];
+        
+        // Veins/roots configuration 
+        const maxVeins = 18; // Number of primary veins
+        const veins = [];
+        const secondaryVeins = [];
+        const tertiaryVeins = [];
+        
+        // Initialize veins in different directions
+        for (let i = 0; i < maxVeins; i++) {
+            const angle = (Math.PI * 2 * i) / maxVeins;
+            const length = baseSize * (2 + Math.random() * 1.5);
+            const speed = 0.2 + Math.random() * 0.3;
+            
+            veins.push({
+                angle,
+                length,
+                speed,
+                progress: 0,
+                width: 1.5 + Math.random(),
+                curve: (Math.random() - 0.5) * 0.4,
+                branches: Math.floor(Math.random() * 3) + 1,
+                delay: Math.random() * 0.2
+            });
+            
+            // Add 1-3 secondary veins per primary vein
+            for (let j = 0; j < veins[i].branches; j++) {
+                const branchPoint = 0.3 + Math.random() * 0.5; // Point along primary vein where branch starts
+                const branchAngle = angle + (Math.random() - 0.5) * 1.0; // Slightly different angle
+                const branchLength = length * (0.4 + Math.random() * 0.4);
+                
+                secondaryVeins.push({
+                    parentIndex: i,
+                    branchPoint,
+                    angle: branchAngle,
+                    length: branchLength,
+                    speed: 0.15 + Math.random() * 0.2,
+                    progress: 0,
+                    width: 1 + Math.random() * 0.5,
+                    curve: (Math.random() - 0.5) * 0.6
+                });
+                
+                // Add tertiary veins (smaller branches from secondary veins)
+                if (Math.random() > 0.5) {
+                    const tertiaryBranchPoint = 0.4 + Math.random() * 0.4;
+                    const tertiaryAngle = branchAngle + (Math.random() - 0.5) * 1.2;
+                    
+                    tertiaryVeins.push({
+                        parentIndex: secondaryVeins.length - 1,
+                        branchPoint: tertiaryBranchPoint,
+                        angle: tertiaryAngle,
+                        length: branchLength * 0.5,
+                        speed: 0.1 + Math.random() * 0.15,
+                        progress: 0,
+                        width: 0.5 + Math.random() * 0.5,
+                        curve: (Math.random() - 0.5) * 0.8
+                    });
+                }
+            }
+        }
+        
+        // Initialize growth segments around the shape
+        const segmentCount = 32;
+        for (let i = 0; i < segmentCount; i++) {
+            const angle = (Math.PI * 2 * i) / segmentCount;
+            progressSegments.push({
+                angle,
+                progress: 0,
+                pulseOffset: Math.random() * Math.PI * 2,
+                maxLength: baseSize * (1.4 + Math.random() * 0.2)
+            });
+        }
+        
+        // Listen for landmarks data
+        socket.on('landmarks', function(data) {
+            handLandmarks = JSON.parse(data);
+        });
+        
+        // Listen for gesture data
+        socket.on('gesture', function(data) {
+            lastGesture = currentGesture;
+            currentGesture = data;
+            
+            // Increase progress when Click gesture is detected
+            if (currentGesture === 'Click' && !burstTriggered) {
+                const now = performance.now();
+                
+                // Add some progress but avoid filling too quickly
+                if (now - lastClickTime > 50) { // throttle updates
+                    seedProgress += 0.01;
+                    growthPulse = 1.0; // Trigger growth pulse
+                    lastClickTime = now;
+                    
+                    // Randomly advance some progress segments
+                    for (let i = 0; i < 3; i++) {
+                        const segIndex = Math.floor(Math.random() * progressSegments.length);
+                        if (progressSegments[segIndex].progress < seedProgress) {
+                            progressSegments[segIndex].progress = seedProgress + Math.random() * 0.1;
+                        }
+                    }
+                }
+                
+                // When progress bar is filled, trigger the burst
+                if (seedProgress >= 1 && !burstTriggered) {
+                    burstTriggered = true;
+                    triggerBurst();
+                }
+            } else {
+                // Slowly decrease growth pulse when not clicking
+                growthPulse *= 0.95;
+            }
+        });
+
+        // Function to trigger the burst animation
+        function triggerBurst() {
+            // Animate the burst over time
+            const burstAnimation = setInterval(() => {
+                burstProgress += 0.02;
+                
+                if (burstProgress >= 1) {
+                    clearInterval(burstAnimation);
+                    
+                    // After burst is complete, wait and then trigger transition
+                    setTimeout(() => {
+                        transitionTriggered = true;
+                        canvas.classList.add('falling');
+                        
+                        // Navigate to the next page after the transition animation
+                        setTimeout(() => {
+                            window.location.href = '/second-stage';
+                        }, 3000);
+                    }, 5000);
+                }
+            }, 50);
+        }
+
+        // Color utility functions
+        function getRGBA(color) {
+            return `rgba(${color.r}, ${color.g}, ${color.b}, ${color.a})`;
+        }
+        
+        function animateColors() {
+            // Subtle color animation
+            const hueShift = Math.sin(time * 0.3) * 30;
+            
+            // Animate primary color (mainly affects blue)
+            dynamicColors.primary.b = Math.max(255 - hueShift, 200);
+            
+            // Animate secondary color
+            dynamicColors.secondary.r = Math.min(200 + hueShift, 255);
+            
+            // Animate glow color
+            dynamicColors.glow.g = Math.min(206 + hueShift * 0.7, 255);
+            dynamicColors.glow.b = Math.max(250 - hueShift * 0.5, 200);
+            
+            // Animate gold color for the veins
+            if (burstTriggered) {
+                const pulseRate = Math.sin(time * 2) * 0.2 + 0.8;
+                dynamicColors.gold.a = 0.4 + pulseRate * 0.3;
+                dynamicColors.gold.r = 255;
+                dynamicColors.gold.g = 215 + Math.sin(time * 1.5) * 30;
+            }
+        }
+
+        // Animation function
+        function animate() {
+            // Clear the canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Update time and animations
+            time += 0.006; // Slow down time for more subtle animation
+            rotation = Math.sin(time * 0.15) * 0.05;
+            breathingScale = 1 + Math.sin(time * 0.5) * 0.03;
+            
+            // Animate colors
+            animateColors();
+            
+            if (burstTriggered) {
+                // Draw the burst effect with veins/roots
+                drawBurst(center.x, center.y, baseSize * breathingScale);
+            } else {
+                // Draw the progress segments (growth tendrils)
+                drawProgressSegments(center.x, center.y);
+                
+                // Draw the original geometric shape with growth effects
+                drawGeometricShape(
+                    center.x, 
+                    center.y, 
+                    baseSize * breathingScale * (1 + growthPulse * 0.05), 
+                    rotation
+                );
+            }
+            
+            // When transition is triggered, draw starless galaxy transition
+            if (transitionTriggered) {
+                drawTransition();
+            }
+            
+            // Draw hand landmarks if available
+            if (handLandmarks && handLandmarks.length > 0) {
+                drawHandLandmarks();
+            }
+            
+            // Continue animation
+            requestAnimationFrame(animate);
+        }
+        
+        // Function to draw the burst effect
+        function drawBurst(x, y, size) {
+            ctx.save();
+            ctx.translate(x, y);
+            
+            // Draw primary veins
+            veins.forEach((vein, index) => {
+                // Update progress based on burst animation
+                if (burstProgress > vein.delay) {
+                    vein.progress = Math.min(1, vein.progress + vein.speed * 0.05);
+                }
+                
+                if (vein.progress > 0) {
+                    // Draw the vein
+                    drawVein(
+                        0, 0,
+                        vein.angle,
+                        vein.length,
+                        vein.curve,
+                        vein.width,
+                        vein.progress
+                    );
+                }
+            });
+            
+            // Draw secondary veins
+            secondaryVeins.forEach((branch, index) => {
+                const parentVein = veins[branch.parentIndex];
+                
+                // Only start growing when parent vein has reached branch point
+                if (parentVein.progress > branch.branchPoint) {
+                    branch.progress = Math.min(1, branch.progress + branch.speed * 0.05);
+                    
+                    if (branch.progress > 0) {
+                        // Calculate position along parent vein
+                        const branchX = Math.cos(parentVein.angle) * parentVein.length * branch.branchPoint;
+                        const branchY = Math.sin(parentVein.angle) * parentVein.length * branch.branchPoint;
+                        
+                        // Draw the branch
+                        drawVein(
+                            branchX, branchY,
+                            branch.angle,
+                            branch.length,
+                            branch.curve,
+                            branch.width,
+                            branch.progress
+                        );
+                    }
+                }
+            });
+            
+            // Draw tertiary veins (smaller branches)
+            tertiaryVeins.forEach((tBranch) => {
+                const parentBranch = secondaryVeins[tBranch.parentIndex];
+                
+                // Only start growing when parent branch has reached branch point
+                if (parentBranch.progress > tBranch.branchPoint) {
+                    tBranch.progress = Math.min(1, tBranch.progress + tBranch.speed * 0.05);
+                    
+                    if (tBranch.progress > 0) {
+                        // Calculate parent vein position
+                        const parentVein = veins[parentBranch.parentIndex];
+                        const parentOriginX = Math.cos(parentVein.angle) * parentVein.length * parentBranch.branchPoint;
+                        const parentOriginY = Math.sin(parentVein.angle) * parentVein.length * parentBranch.branchPoint;
+                        
+                        // Calculate position along secondary branch
+                        const branchX = parentOriginX + Math.cos(parentBranch.angle) * parentBranch.length * tBranch.branchPoint;
+                        const branchY = parentOriginY + Math.sin(parentBranch.angle) * parentBranch.length * tBranch.branchPoint;
+                        
+                        // Draw the tertiary branch
+                        drawVein(
+                            branchX, branchY,
+                            tBranch.angle,
+                            tBranch.length,
+                            tBranch.curve,
+                            tBranch.width,
+                            tBranch.progress
+                        );
+                    }
+                }
+            });
+            
+            // Draw a smaller version of the original shape in the center
+            const burstShapeSize = size * (1 - burstProgress * 0.5);
+            drawGeometricShape(0, 0, burstShapeSize, rotation * 2);
+            
+            ctx.restore();
+        }
+        
+        // Draw a single vein
+        function drawVein(startX, startY, angle, length, curve, width, progress) {
+            // Create a curved path for the vein
+            ctx.beginPath();
+            
+            // Start point
+            ctx.moveTo(startX, startY);
+            
+            // Create a curved path using quadratic curve
+            const endX = startX + Math.cos(angle) * length * progress;
+            const endY = startY + Math.sin(angle) * length * progress;
+            
+            // Control point for curve
+            const midX = (startX + endX) / 2 - Math.sin(angle) * curve * length * progress;
+            const midY = (startY + endY) / 2 + Math.cos(angle) * curve * length * progress;
+            
+            ctx.quadraticCurveTo(midX, midY, endX, endY);
+            
+            // Create pulsing gold glow effect
+            ctx.shadowColor = getRGBA(dynamicColors.gold);
+            ctx.shadowBlur = 10;
+            
+            // Create gradient for the veins
+            const gradient = ctx.createLinearGradient(startX, startY, endX, endY);
+            gradient.addColorStop(0, `rgba(255, 215, 0, ${0.8 * dynamicColors.gold.a})`);
+            gradient.addColorStop(0.5, `rgba(255, 235, 120, ${0.6 * dynamicColors.gold.a})`);
+            gradient.addColorStop(1, `rgba(255, 245, 200, ${0.4 * dynamicColors.gold.a})`);
+            
+            ctx.strokeStyle = gradient;
+            ctx.lineWidth = width * (1 - progress * 0.3); // Taper the vein
+            ctx.lineCap = 'round';
+            ctx.stroke();
+            
+            // Draw small particles along the vein for additional effect
+            if (Math.random() > 0.6 && progress > 0.2) {
+                const particleCount = Math.floor(progress * 3);
+                for (let i = 0; i < particleCount; i++) {
+                    const t = Math.random();
+                    const pX = startX + (endX - startX) * t;
+                    const pY = startY + (endY - startY) * t;
+                    
+                    // Calculate position considering the curve
+                    const adjustedPX = pX + (midX - ((startX + endX) / 2)) * 4 * t * (1 - t);
+                    const adjustedPY = pY + (midY - ((startY + endY) / 2)) * 4 * t * (1 - t);
+                    
+                    ctx.beginPath();
+                    ctx.arc(adjustedPX, adjustedPY, Math.random() * 1.5, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(255, 245, 220, ${Math.random() * 0.7 + 0.3})`;
+                    ctx.fill();
+                }
+            }
+        }
+        
+        // Function to draw transition effect
+        function drawTransition() {
+            // Create a starless galaxy effect for transition
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.03)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Add subtle dust particles
+            for (let i = 0; i < 5; i++) {
+                const x = Math.random() * canvas.width;
+                const y = Math.random() * canvas.height;
+                const size = Math.random() * 2;
+                
+                ctx.beginPath();
+                ctx.arc(x, y, size, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.1})`;
+                ctx.fill();
+            }
+        }
+        
+        // Function to draw progress segments around the shape
+        function drawProgressSegments(x, y) {
+            ctx.save();
+            ctx.translate(x, y);
+            
+            // Draw the subtle progress indicator
+            if (seedProgress > 0) {
+                // Draw outer progress arc
+                ctx.beginPath();
+                ctx.arc(0, 0, baseSize * 1.6, 0, Math.PI * 2 * seedProgress);
+                ctx.strokeStyle = `rgba(255, 255, 255, ${0.2 + growthPulse * 0.3})`;
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                
+                // Draw progress tendrils
+                progressSegments.forEach(segment => {
+                    if (segment.progress > 0) {
+                        const actualProgress = Math.min(segment.progress, seedProgress);
+                        const pulseFactor = Math.sin(time * 3 + segment.pulseOffset) * 0.2 + 0.8;
+                        const segmentLength = segment.maxLength * actualProgress;
+                        
+                        // Draw tendril
+                        ctx.beginPath();
+                        ctx.moveTo(0, 0);
+                        
+                        // Create a curved path
+                        const endX = Math.cos(segment.angle) * segmentLength;
+                        const endY = Math.sin(segment.angle) * segmentLength;
+                        
+                        // Control point for natural curve
+                        const ctrlX = Math.cos(segment.angle + Math.PI/8) * segmentLength * 0.6;
+                        const ctrlY = Math.sin(segment.angle + Math.PI/8) * segmentLength * 0.6;
+                        
+                        ctx.quadraticCurveTo(ctrlX, ctrlY, endX, endY);
+                        
+                        // Create gradient for tendril
+                        const gradient = ctx.createLinearGradient(0, 0, endX, endY);
+                        gradient.addColorStop(0, `rgba(255, 255, 255, ${0.8 * pulseFactor * actualProgress})`);
+                        gradient.addColorStop(1, `rgba(255, 255, 255, 0)`);
+                        
+                        ctx.strokeStyle = gradient;
+                        ctx.lineWidth = 1 + growthPulse;
+                        ctx.lineCap = 'round';
+                        ctx.stroke();
+                        
+                        // Add particles at the end of growing tendrils
+                        if (growthPulse > 0.5 && Math.random() > 0.85 && segment.progress > 0.3) {
+                            ctx.beginPath();
+                            ctx.arc(endX, endY, 1 + Math.random() * 2, 0, Math.PI * 2);
+                            ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.5 + 0.3})`;
+                            ctx.fill();
+                        }
+                    }
+                });
+            }
+            
+            ctx.restore();
+        }
+        
+        // Function to draw the geometric shape - add growth effects
+        function drawGeometricShape(x, y, size, rotation) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(rotation);
+            
+            // Create a subtle glow effect enhanced by growth pulse
+            ctx.shadowColor = getRGBA({
+                ...dynamicColors.glow,
+                a: dynamicColors.glow.a + growthPulse * 0.3
+            });
+            ctx.shadowBlur = 25 + growthPulse * 15;
+            
+            // Create three intersecting triangles
+            const triangleAngles = [0, Math.PI * 2 / 3, Math.PI * 4 / 3];
+            
+            // Draw triangles
+            triangleAngles.forEach((angle, index) => {
+                ctx.save();
+                
+                // Each triangle rotates slightly differently and more actively during growth
+                const growthRotation = growthPulse * 0.03 * Math.sin(time * 5 + index);
+                const individualRotation = angle + Math.sin(time * 0.3 + index * 0.7) * 0.04 + growthRotation;
+                ctx.rotate(individualRotation);
+                
+                // Draw outer triangle with stroke
+                ctx.beginPath();
+                ctx.moveTo(0, -size);
+                ctx.lineTo(size * 0.866, size * 0.5); // cos(30°), sin(30°)
+                ctx.lineTo(-size * 0.866, size * 0.5);
+                ctx.closePath();
+                ctx.strokeStyle = getRGBA({
+                    ...dynamicColors.primary,
+                    a: dynamicColors.primary.a + growthPulse * 0.1
+                });
+                ctx.lineWidth = 1.5 + growthPulse * 0.5;
+                ctx.stroke();
+                
+                // Draw inner lines with reactive growth
+                ctx.beginPath();
+                ctx.moveTo(0, -size * 0.5);
+                ctx.lineTo(0, size * 0.5);
+                ctx.strokeStyle = getRGBA({
+                    ...dynamicColors.tertiary, 
+                    a: dynamicColors.tertiary.a + growthPulse * 0.2
+                });
+                ctx.lineWidth = 1 + growthPulse * 0.3;
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(-size * 0.433, 0); // half of 0.866
+                ctx.lineTo(size * 0.433, 0);
+                ctx.stroke();
+                
+                ctx.restore();
+            });
+            
+            // Create subtle pulse effect for center - enhanced during growth
+            const growthPulseEffect = growthPulse * 0.08;
+            const pulseSize = size * (0.08 + Math.sin(time * 1.2) * 0.01 + growthPulseEffect);
+            
+            // Draw center circle with growth enhancement
+            ctx.beginPath();
+            ctx.arc(0, 0, pulseSize, 0, Math.PI * 2);
+            ctx.fillStyle = getRGBA({
+                ...dynamicColors.secondary,
+                a: dynamicColors.secondary.a + growthPulse * 0.3
+            });
+            ctx.fill();
+            
+            // Draw subtle connecting circles
+            const smallCircleSize = size * (0.03 + growthPulse * 0.01);
+            triangleAngles.forEach((angle) => {
+                const circleX = Math.sin(angle) * size * 0.3;
+                const circleY = -Math.cos(angle) * size * 0.3;
+                
+                ctx.beginPath();
+                ctx.arc(circleX, circleY, smallCircleSize, 0, Math.PI * 2);
+                ctx.fillStyle = getRGBA({
+                    ...dynamicColors.tertiary, 
+                    a: 0.3 + growthPulse * 0.2
+                });
+                ctx.fill();
+            });
+            
+            ctx.restore();
+        }
+        
+        // Function to draw hand landmarks
+        function drawHandLandmarks() {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+            
+            handLandmarks.forEach((point, index) => {
+                const x = point.x * canvas.width;
+                const y = point.y * canvas.height;
+                
+                // Draw with varied sizes based on point index for visual interest
+                const radius = index % 4 === 0 ? 4 : 2.5;
+                
+                ctx.beginPath();
+                ctx.arc(x, y, radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Connect hand landmarks with lines for better visualization
+                if (index > 0 && (index % 4 !== 0)) {
+                    const prevPoint = handLandmarks[index - 1];
+                    const prevX = prevPoint.x * canvas.width;
+                    const prevY = prevPoint.y * canvas.height;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(prevX, prevY);
+                    ctx.lineTo(x, y);
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
+            });
+        }
+
+        // Resize canvas when window is resized
+        window.addEventListener('resize', function() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            center.x = canvas.width / 2;
+            center.y = canvas.height / 2;
+        });
+        
+        // Manually trigger burst for testing (remove for production)
+        // Comment out for production or when using actual hand gesture
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'b' && !burstTriggered) {
+                burstTriggered = true;
+                triggerBurst();
+            }
+        });
+        
+        // Start animation
+        animate();
+    </script>
+</body>
+</html> 
