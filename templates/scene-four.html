@@ -68,6 +68,31 @@
             line-height: 1.6;
             color: rgba(200, 230, 255, 0.8);
         }
+        .transition-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        .gesture-dot {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background-color: rgba(60, 80, 120, 0.3);
+            border: 1px solid rgba(120, 200, 255, 0.5);
+            transition: all 0.3s ease;
+        }
+        .gesture-dot.active {
+            background-color: rgba(120, 200, 255, 0.7);
+            box-shadow: 0 0 10px rgba(120, 200, 255, 0.7);
+        }
+        .gesture-dot.click {
+            background-color: rgba(200, 220, 255, 0.7);
+        }
+        .gesture-dot.hold {
+            background-color: rgba(100, 150, 255, 0.7);
+        }
     </style>
 </head>
 <body>
@@ -78,7 +103,13 @@
     <canvas id="forestCanvas"></canvas>
     
     <div class="instructions">
-        <p class="instruction-text">Explore the petrified forest of data trees - monuments to digital ghosts of extinct species.</p>
+        <p class="instruction-text">Explore the digital forest – plant new trees with a Click gesture, or disintegrate them with Hold. To continue your journey, perform the sequence: Click, Hold, Click.</p>
+    </div>
+
+    <div class="transition-indicator">
+        <div class="gesture-dot" id="gesture-1"></div>
+        <div class="gesture-dot" id="gesture-2"></div>
+        <div class="gesture-dot" id="gesture-3"></div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
@@ -119,24 +150,6 @@
         let cameraZ = 2000;
         let cameraOffset = { x: 0, y: 0 };
         let targetCameraOffset = { x: 0, y: 0 };
-        
-        // Interaction state
-        let lastInteractionTime = 0;
-        const INTERACTION_COOLDOWN = 1000; // ms between interactions
-        let growingSeed = null; // Track currently growing seed
-        let deletionEffect = null; // Track active deletion effect
-        
-        // Seed growth parameters
-        const SEED_GROWTH_DURATION = 2.5; // seconds to grow from seed to tree
-        const SEED_PHASES = ['seed', 'sprout', 'sapling', 'tree'];
-        
-        // Deletion effect parameters
-        const DELETION_DURATION = 2.0; // seconds for deletion animation
-        const DELETION_RADIUS = 150; // radius of deletion effect
-        const ASH_PARTICLES_COUNT = 150; // number of ash particles per tree deletion
-        
-        // Ash particles storage
-        const ashParticles = [];
         
         // Stars for background
         const stars = [];
@@ -300,119 +313,37 @@
         
         // Create data trees
         function createDataTrees() {
-            // Create trees in a more balanced distribution to ensure visibility
-            const centerX = 0;
-            const centerY = 0;
-            const centerZ = 0;
+            // Clear any existing trees 
+            dataTrees.length = 0;
             
-            // Create trees of different sizes and positions
-            for (let i = 0; i < NUM_TREES; i++) {
-                // Calculate position with better distribution
-                // Use fixed angles to ensure even spread around the scene
-                const angle = (i / NUM_TREES) * Math.PI * 2;
-                
-                // Organize trees in tiers for better visibility
-                let distance, y;
-                const tier = i % 3;
-                
-                if (tier === 0) {
-                    // Close trees in foreground (bottom of screen)
-                    distance = 400 + Math.random() * 150;
-                    y = centerY + 150 + Math.random() * 100; // Lower on screen (closer)
-                } else if (tier === 1) {
-                    // Mid-range trees
-                    distance = 600 + Math.random() * 150;
-                    y = centerY - 50 + Math.random() * 100; // Mid-level on screen
-                } else {
-                    // Distant trees in background (top of screen)
-                    distance = 800 + Math.random() * 150;
-                    y = centerY - 250 - Math.random() * 100; // Higher on screen (further)
-                }
-                
-                // Position with controlled x and z coordinates
-                const x = centerX + Math.cos(angle) * distance;
-                const z = centerZ + Math.sin(angle) * distance;
-                
-                // Size based on distance - foreground trees larger
-                const sizeFactor = tier === 0 ? 1.2 : (tier === 1 ? 1.0 : 0.8);
-                const height = (250 + Math.random() * 200) * sizeFactor;
-                const width = height * (0.18 + Math.random() * 0.08);
-                
-                // Create tree with more varied colors
-                dataTrees.push({
-                    id: i,
-                    x, y, z,
-                    height,
-                    width,
-                    color: {
-                        r: 40 + Math.random() * 40,
-                        g: 80 + Math.random() * 70,
-                        b: 150 + Math.random() * 60,
-                        a: 0.4 + Math.random() * 0.3
-                    },
-                    // Animation parameters
-                    rotation: Math.random() * Math.PI * 2,
-                    rotationSpeed: (Math.random() - 0.5) * 0.1,
-                    pulsePhase: Math.random() * Math.PI * 2,
-                    hoverOffset: 0, // For hover animation
-                    // Tree characteristics
-                    branches: [],
-                    leaves: [],
-                    // Ghost effect 
-                    ghostLayers: 2 + Math.floor(Math.random() * 3),
-                    ghostAlpha: 0.2 + Math.random() * 0.3,
-                    // Digital "spirits" trapped in the tree
-                    spirits: [],
-                    spiritCount: Math.floor(Math.random() * 5) + 3,
-                    // Interaction state
-                    isSelected: false,
-                    selectionIntensity: 0,
-                    // Light effects
-                    glowIntensity: 0.5 + Math.random() * 0.5,
-                    glowColor: {
-                        r: 150 + Math.random() * 50,
-                        g: 200 + Math.random() * 55,
-                        b: 255,
-                    }
-                });
-                
-                // Generate branches
-                generateBranches(dataTrees[i]);
-                
-                // Generate leaves
-                generateLeaves(dataTrees[i]);
-                
-                // Generate spirits trapped in the tree
-                generateSpirits(dataTrees[i]);
-            }
-            
-            // Create connections between nearby trees
+            // Don't create initial trees - start with empty forest
+            // Create connections (empty at first)
             createConnections();
         }
         
         // Generate branches for a data tree
         function generateBranches(tree) {
             // Increase number of branches to support more leaf clusters
-            const numBranches = Math.floor(Math.random() * 4) + 7; // 7-10 branches
+            const numBranches = Math.floor(Math.random() * 5) + 7; // 7-11 branches
             
             for (let i = 0; i < numBranches; i++) {
                 // Distribute branches more evenly around the tree
                 const angleSegment = (Math.PI * 2) / numBranches;
                 const baseAngle = i * angleSegment; 
                 // Add some randomness to the angle within the segment
-                const angle = baseAngle + (Math.random() - 0.5) * angleSegment * 0.5;
+                const angle = baseAngle + (Math.random() - 0.5) * angleSegment * 0.6;
                 
                 // Branch start point somewhere along the tree height - more distributed
-                // Favor upper half of the tree for better visibility
-                const heightPercent = (i % 3 === 0) ? 
-                    0.3 + Math.random() * 0.3 :     // Lower branches (30-60%)
-                    0.6 + Math.random() * 0.25;     // Upper branches (60-85%)
+                // Favor upper two-thirds of the tree for better visibility
+                const heightPercent = (i % 4 === 0) ? 
+                    0.25 + Math.random() * 0.25 :     // Lower branches (25-50%)
+                    0.5 + Math.random() * 0.35;     // Upper branches (50-85%)
                 
                 const startHeight = tree.height * heightPercent;
                 
                 // Make branches longer on average for more leaf space
-                const length = tree.width * (0.7 + Math.random() * 0.8);
-                const thickness = 4 + Math.random() * 10;
+                const length = tree.width * (0.9 + Math.random() * 0.9);
+                const thickness = 3 + Math.random() * 8;
                 
                 tree.branches.push({
                     startHeight,
@@ -421,26 +352,26 @@
                     thickness,
                     // Animation
                     swayPhase: Math.random() * Math.PI * 2,
-                    swaySpeed: 0.2 + Math.random() * 0.3,
-                    swayAmount: 0.8 + Math.random() * 2,
+                    swaySpeed: 0.15 + Math.random() * 0.25,
+                    swayAmount: 0.9 + Math.random() * 1.8,
                     // Visual effect
                     branchSegments: Math.floor(3 + Math.random() * 3)
                 });
             }
             
-            // Add a few smaller sub-branches to main branches for more attachment points
+            // Add more smaller sub-branches to main branches for more attachment points
             const mainBranchCount = tree.branches.length;
             for (let i = 0; i < mainBranchCount; i++) {
-                // Only add sub-branches to longer main branches
-                if (tree.branches[i].length > tree.width * 0.7 && Math.random() > 0.3) {
+                // Add sub-branches to most main branches
+                if (tree.branches[i].length > tree.width * 0.7 && Math.random() > 0.2) {
                     const mainBranch = tree.branches[i];
                     
-                    // Create 1-2 sub-branches
-                    const subBranchCount = Math.floor(Math.random() * 2) + 1;
+                    // Create 1-3 sub-branches
+                    const subBranchCount = Math.floor(Math.random() * 3) + 1;
                     
                     for (let j = 0; j < subBranchCount; j++) {
-                        // Create sub-branch at 40-70% along main branch
-                        const distanceAlongBranch = 0.4 + Math.random() * 0.3;
+                        // Create sub-branch at 40-90% along main branch
+                        const distanceAlongBranch = 0.4 + Math.random() * 0.5;
                         
                         // Calculate sub-branch start position
                         const branchY = tree.y - mainBranch.startHeight;
@@ -456,7 +387,7 @@
                         const subAngle = mainBranch.angle + (Math.random() > 0.5 ? angleOffset : -angleOffset);
                         
                         // Sub-branches are smaller
-                        const subLength = mainBranch.length * (0.3 + Math.random() * 0.3);
+                        const subLength = mainBranch.length * (0.4 + Math.random() * 0.35);
                         const subThickness = mainBranch.thickness * 0.6;
                         
                         tree.branches.push({
@@ -466,8 +397,8 @@
                             thickness: subThickness,
                             // Animation
                             swayPhase: Math.random() * Math.PI * 2,
-                            swaySpeed: 0.3 + Math.random() * 0.4,
-                            swayAmount: 1 + Math.random() * 2.5,
+                            swaySpeed: 0.25 + Math.random() * 0.35,
+                            swayAmount: 1.2 + Math.random() * 2.2,
                             // Visual effect
                             branchSegments: Math.floor(2 + Math.random() * 2),
                             // Flag as sub-branch for future reference
@@ -480,69 +411,97 @@
         
         // Generate leaves for a data tree
         function generateLeaves(tree) {
-            // Create fewer leaves per tree but ensure they're better distributed
-            const numLeafClusters = Math.floor(Math.random() * 5) + 4;
+            // Create fewer leaves per tree with better distribution
+            const numLeafClusters = Math.floor(Math.random() * 4) + 3; // 3-6 leaves per tree (reduced from 4-8)
             
             // Make sure tree has branches before proceeding
             if (tree.branches.length === 0) {
                 return; // Skip trees without branches
             }
             
+            // Sort branches by their height on the tree - we'll use this to distribute leaves evenly
+            const sortedBranches = [...tree.branches].sort((a, b) => a.startHeight - b.startHeight);
+            const branchGroups = [];
+            
+            // Group branches by height sections to ensure better vertical distribution
+            const treeHeightSections = 3; // Divide tree into sections
+            for (let i = 0; i < treeHeightSections; i++) {
+                branchGroups.push([]);
+            }
+            
+            // Assign branches to height groups
+            sortedBranches.forEach(branch => {
+                const heightPercent = branch.startHeight / tree.height;
+                const groupIndex = Math.min(treeHeightSections - 1, Math.floor(heightPercent * treeHeightSections));
+                branchGroups[groupIndex].push(branch);
+            });
+            
+            // Create leaves distributed across height sections
             for (let i = 0; i < numLeafClusters; i++) {
-                // Force placement on branches (avoid trunk placement completely)
-                const onBranch = true;
-                let position, angle;
+                // Determine which height section to place this leaf
+                const sectionIndex = i % treeHeightSections;
+                let branchGroup = branchGroups[sectionIndex];
                 
-                // Select branch - prefer outer branches for better visibility
-                const branchIndices = [...Array(tree.branches.length).keys()];
-                // Sort branches by length (prefer longer branches)
-                branchIndices.sort((a, b) => tree.branches[b].length - tree.branches[a].length);
+                // If this section has no branches, find another section
+                if (branchGroup.length === 0) {
+                    for (let j = 0; j < treeHeightSections; j++) {
+                        if (branchGroups[j].length > 0) {
+                            branchGroup = branchGroups[j];
+                            break;
+                        }
+                    }
+                }
                 
-                // Choose from the first 70% of branches (the longer ones)
-                const branchIndexPosition = Math.floor(Math.random() * Math.max(1, Math.floor(branchIndices.length * 0.7)));
-                const branchIndex = branchIndices[branchIndexPosition];
-                const branch = tree.branches[branchIndex];
+                // Skip if no suitable branches found
+                if (branchGroup.length === 0) continue;
+                
+                // Choose a random branch from this group
+                const branch = branchGroup[Math.floor(Math.random() * branchGroup.length)];
                 
                 // Place more naturally along branches - strongly favor tips (outer positions)
-                const distanceAlongBranch = Math.pow(Math.random(), 0.5) * 0.5 + 0.5; // 50-100% along branch (outer half)
+                const distanceAlongBranch = 0.6 + Math.random() * 0.4; // 60-100% along branch (outer portion)
                 
-                position = {
+                const position = {
                     h: branch.startHeight,
                     r: branch.length * distanceAlongBranch,
                     branchAngle: branch.angle
                 };
                 
-                // Vary the angles more for a more natural, spread-out look
-                // Leaves should look like they're growing outward and not just along the branch
-                angle = branch.angle + (Math.random() - 0.5) * Math.PI * 1.2;
+                // Vary the angles more dramatically for a natural, artistic spread
+                // Leaves should look like they're growing outward from the branch
+                // Limiting variation to ±45 degrees (π/4 radians) for readability
+                const angleVariation = (Math.random() - 0.5) * Math.PI * 0.5; // -/+ 45 degrees
+                const angle = branch.angle + angleVariation;
                 
-                // Pick a random leaf image from the expanded collection
+                // Pick a random leaf image
                 const imageIndex = Math.floor(Math.random() * leafImages.length);
                 
                 // Create leaf with improved positioning properties
                 tree.leaves.push({
                     position,
                     angle,
-                    size: 40 + Math.random() * 60, // Slightly larger for better visibility
+                    size: 45 + Math.random() * 65, // Larger size for better visibility
                     imageIndex,
-                    // Animation parameters
-                    rotationSpeed: (Math.random() - 0.5) * 0.2,
-                    currentRotation: Math.random() * Math.PI * 2,
+                    // Animation parameters - limit rotation speed to maintain readability
+                    rotationSpeed: (Math.random() - 0.5) * 0.08, // Reduced speed to preserve readability
+                    currentRotation: (Math.random() - 0.5) * Math.PI * 0.5, // Initial rotation within ±45 degrees
                     pulsePhase: Math.random() * Math.PI * 2,
                     // Visual effects
-                    opacity: 0.75 + Math.random() * 0.25,
+                    opacity: 0.8 + Math.random() * 0.2, // Higher base opacity
                     // Hover animation
-                    hoverAmplitude: 5 + Math.random() * 10,
-                    hoverFrequency: 0.3 + Math.random() * 0.7,
+                    hoverAmplitude: 5 + Math.random() * 8,
+                    hoverFrequency: 0.2 + Math.random() * 0.4, // Slower, more graceful movement
                     // Simplified tint
                     tint: {
                         r: 180 + Math.random() * 75,
                         g: 180 + Math.random() * 75,
                         b: 230 + Math.random() * 25,
-                        strength: 0.15 + Math.random() * 0.25
+                        strength: 0.12 + Math.random() * 0.18 // Reduced tint strength
                     },
                     // Distance from branch - make them stick out more
-                    offset: 10 + Math.random() * 20
+                    offset: 15 + Math.random() * 35, // Increased offset range
+                    // Limit for max rotation to ensure readability
+                    maxRotation: Math.PI / 4 // 45 degrees
                 });
             }
         }
@@ -758,22 +717,262 @@
                 handleClick();
             }
             
-            // Handle "Hold" gesture to control camera movement
+            // Handle "Hold" gesture to control camera movement and disintegrate trees
             if (currentGesture === 'Hold' && handPosition) {
                 // Adjust camera Z based on hand position Y
                 const targetZ = 1500 + (handPosition.y / canvas.height) * 1000;
                 cameraZ += (targetZ - cameraZ) * 0.05;
+                
+                // Handle tree disintegration
+                handleHoldDisintegration();
             }
+            
+            // Check for transition pattern
+            checkTransitionTrigger();
         });
+        
+        // Variables to track gesture history for transition
+        const gestureHistory = [];
+        const neededGesturePattern = ['Click', 'Hold', 'Click'];
+        const transitionDelay = 1500; // milliseconds
+        let lastGestureTime = 0;
+        let transitionStarted = false;
+        
+        // Check if the transition pattern has been completed
+        function checkTransitionTrigger() {
+            const currentTime = Date.now();
+            
+            // If it's a new gesture, add it to history
+            if (currentGesture !== lastGesture) {
+                // Reset if too much time has passed since last gesture
+                if (currentTime - lastGestureTime > 2000 && gestureHistory.length > 0) {
+                    gestureHistory.length = 0;
+                    updateTransitionIndicator();
+                }
+                
+                // Add new gesture to history
+                gestureHistory.push(currentGesture);
+                // Keep only the most recent gestures that match the pattern length
+                if (gestureHistory.length > neededGesturePattern.length) {
+                    gestureHistory.shift();
+                }
+                
+                lastGestureTime = currentTime;
+                
+                // Update the visual indicator
+                updateTransitionIndicator();
+                
+                // Check if pattern is complete
+                let patternMatch = true;
+                if (gestureHistory.length === neededGesturePattern.length) {
+                    for (let i = 0; i < neededGesturePattern.length; i++) {
+                        if (gestureHistory[i] !== neededGesturePattern[i]) {
+                            patternMatch = false;
+                            break;
+                        }
+                    }
+                    
+                    // If pattern matches and transition hasn't started yet
+                    if (patternMatch && !transitionStarted) {
+                        startTransition();
+                    }
+                }
+            }
+        }
+        
+        // Update the visual indicator for transition progress
+        function updateTransitionIndicator() {
+            for (let i = 0; i < neededGesturePattern.length; i++) {
+                const dotElement = document.getElementById(`gesture-${i+1}`);
+                
+                if (i < gestureHistory.length) {
+                    dotElement.classList.add('active');
+                    // Add gesture-specific class
+                    if (gestureHistory[i] === 'Click') {
+                        dotElement.classList.add('click');
+                        dotElement.classList.remove('hold');
+                    } else if (gestureHistory[i] === 'Hold') {
+                        dotElement.classList.add('hold');
+                        dotElement.classList.remove('click');
+                    }
+                } else {
+                    dotElement.classList.remove('active', 'click', 'hold');
+                }
+            }
+        }
+        
+        // Begin transition to next scene
+        function startTransition() {
+            transitionStarted = true;
+            
+            // Create a dramatic visual effect
+            for (let i = 0; i < dataTrees.length; i++) {
+                // Schedule disintegration of all trees with slight delays
+                setTimeout(() => {
+                    if (i < dataTrees.length) {
+                        disintegrateTree(dataTrees[i], i);
+                    }
+                }, i * 100); // Stagger by 100ms
+            }
+            
+            // Create big binary burst effect at center
+            setTimeout(() => {
+                const centerX = 0;
+                const centerY = 0;
+                const centerZ = 0;
+                createBinaryBurstEffect(centerX, centerY, centerZ, 200);
+                
+                // Create white flash effect
+                createWhiteFlash();
+            }, dataTrees.length * 100 + 500);
+            
+            // Redirect to next scene after visual effects
+            setTimeout(() => {
+                window.location.href = '/scene-five';
+            }, dataTrees.length * 100 + transitionDelay);
+        }
+        
+        // Create white flash effect for transition
+        function createWhiteFlash() {
+            const flashOverlay = document.createElement('div');
+            flashOverlay.style.position = 'fixed';
+            flashOverlay.style.top = 0;
+            flashOverlay.style.left = 0;
+            flashOverlay.style.width = '100%';
+            flashOverlay.style.height = '100%';
+            flashOverlay.style.backgroundColor = 'white';
+            flashOverlay.style.opacity = 0;
+            flashOverlay.style.zIndex = 1000;
+            flashOverlay.style.transition = 'opacity 0.5s ease-in-out';
+            
+            document.body.appendChild(flashOverlay);
+            
+            // Fade in
+            setTimeout(() => {
+                flashOverlay.style.opacity = 1;
+            }, 10);
+            
+            // Fade out slowly
+            setTimeout(() => {
+                flashOverlay.style.opacity = 0;
+            }, 800);
+        }
+        
+        // Particle system for tree disintegration
+        const disintegrationParticles = [];
+        
+        // Handle Hold gesture to disintegrate trees
+        function handleHoldDisintegration() {
+            if (!handPosition) return;
+            
+            // Define disintegration radius - area affected by the Hold gesture
+            const disintegrationRadius = 120;
+            
+            // Find trees within disintegration radius
+            for (let i = dataTrees.length - 1; i >= 0; i--) {
+                const tree = dataTrees[i];
+                
+                // Project tree position to screen
+                const treeProj = project3D(tree.x, tree.y, tree.z);
+                
+                // Calculate 2D distance on screen from hand position
+                const dx = treeProj.x - handPosition.x;
+                const dy = treeProj.y - handPosition.y;
+                const distance = Math.sqrt(dx*dx + dy*dy);
+                
+                // If tree is within disintegration radius, start disintegrating it
+                if (distance < disintegrationRadius) {
+                    // Create disintegration effect
+                    disintegrateTree(tree, i);
+                    
+                    // Remove tree from array
+                    dataTrees.splice(i, 1);
+                    
+                    // Recalculate connections after removing a tree
+                    createConnections();
+                    
+                    // Only disintegrate one tree per frame for better performance
+                    break;
+                }
+            }
+        }
+        
+        // Create disintegration effect for a tree
+        function disintegrateTree(tree, treeIndex) {
+            // Number of particles based on tree size
+            const particleCount = Math.floor(tree.height * tree.width / 200);
+            
+            // Create binary code particles for trunk
+            for (let i = 0; i < particleCount; i++) {
+                // Random position within tree trunk
+                const heightPercent = Math.random();
+                const y = tree.y - tree.height * heightPercent;
+                const angle = Math.random() * Math.PI * 2;
+                const radius = Math.random() * tree.width * 0.5;
+                
+                const x = tree.x + Math.cos(angle) * radius;
+                const z = tree.z + Math.sin(angle) * radius;
+                
+                // Create binary digit
+                createBinaryAshParticle(x, y, z, tree.color);
+            }
+            
+            // Create particles for each branch
+            tree.branches.forEach(branch => {
+                const branchY = tree.y - branch.startHeight;
+                const branchX = tree.x + Math.cos(branch.angle) * branch.length * 0.5;
+                const branchZ = tree.z + Math.sin(branch.angle) * branch.length * 0.5;
+                
+                for (let i = 0; i < Math.floor(branch.length / 20); i++) {
+                    createBinaryAshParticle(
+                        branchX + (Math.random() - 0.5) * branch.length * 0.3,
+                        branchY + (Math.random() - 0.5) * 20,
+                        branchZ + (Math.random() - 0.5) * branch.length * 0.3,
+                        tree.color
+                    );
+                }
+            });
+            
+            // Create particles for each spirit
+            tree.spirits.forEach(spirit => {
+                const spiritY = tree.y - spirit.height;
+                const spiritX = tree.x + Math.cos(spirit.angle) * spirit.radius;
+                const spiritZ = tree.z + Math.sin(spirit.angle) * spirit.radius;
+                
+                // Create glowing particles for spirit
+                for (let i = 0; i < 10; i++) {
+                    createGlowingAshParticle(
+                        spiritX + (Math.random() - 0.5) * 30,
+                        spiritY + (Math.random() - 0.5) * 30,
+                        spiritZ + (Math.random() - 0.5) * 30,
+                        spirit.color
+                    );
+                }
+            });
+            
+            // Create particles for each leaf
+            tree.leaves.forEach(leaf => {
+                const leafPos = getLeafPosition(tree, leaf);
+                createGlowingAshParticle(leafPos.x, leafPos.y, leafPos.z, {
+                    r: 100 + Math.random() * 50,
+                    g: 180 + Math.random() * 50,
+                    b: 220 + Math.random() * 35,
+                    a: 0.8
+                });
+            });
+            
+            // Play disintegration sound or effect if needed
+            // ...
+        }
         
         // Handle click interaction with trees and spirits
         function handleClick() {
             if (!handPosition) return;
             
             // Convert screen position to world space for hit testing
-            // This is an approximate conversion
-            const worldX = (handPosition.x - canvas.width/2 - cameraOffset.x) * (cameraZ / 1000);
-            const worldY = (handPosition.y - canvas.height/2 - cameraOffset.y) * (cameraZ / 1000);
+            // This is an approximate conversion - fix the scaling to better match finger position
+            const worldX = (handPosition.x - canvas.width/2) / (cameraZ / 1000);
+            const worldY = (handPosition.y - canvas.height/2) / (cameraZ / 1000);
             
             // Find closest tree/spirit to interact with
             let closestTree = null;
@@ -802,6 +1001,270 @@
             // If we found a tree to interact with
             if (closestTree) {
                 interactWithTree(closestTree);
+            } else {
+                // If no tree was clicked, plant a new tree at finger position
+                // Use a more direct planting approach for better accuracy
+                plantDigitalSeedAtScreen(handPosition.x, handPosition.y);
+            }
+        }
+        
+        // Plant a digital seed directly using screen coordinates
+        function plantDigitalSeedAtScreen(screenX, screenY) {
+            // Calculate depth based on Y position (higher on screen = further away)
+            const depthFactor = screenY / canvas.height; // 0 at top, 1 at bottom
+            const z = 800 - depthFactor * 400; // 400 at top of screen, 800 at bottom
+            
+            // Reverse the 3D projection to get world coordinates
+            const cameraFactor = cameraZ / (z + cameraZ);
+            const worldX = (screenX - canvas.width/2 - cameraOffset.x) / cameraFactor;
+            const worldY = (screenY - canvas.height/2 - cameraOffset.y) / cameraFactor;
+            
+            // Plant the seed at the calculated world position
+            plantDigitalSeed(worldX, worldY, z);
+        }
+        
+        // Plant a digital seed that grows into a tree with explicit z coordinate
+        const digitalSeeds = [];
+        function plantDigitalSeed(x, y, z = null) {
+            // If z is not provided, calculate it based on distance from center with some randomness
+            if (z === null) {
+                z = (Math.random() - 0.5) * 400 + 600;
+            }
+            
+            // Create a new seed
+            const seed = {
+                id: dataTrees.length,
+                x: x,
+                y: y,
+                z: z,
+                growthStage: 0, // 0 = seed, 1 = sapling, 2 = full tree
+                growthRate: 0.5 + Math.random() * 0.5,
+                pulsePhase: Math.random() * Math.PI * 2,
+                growthProgress: 0,
+                // Final tree parameters (will be used when fully grown)
+                finalHeight: 200 + Math.random() * 150,
+                finalWidth: 30 + Math.random() * 20,
+                color: {
+                    r: 40 + Math.random() * 40,
+                    g: 80 + Math.random() * 70,
+                    b: 150 + Math.random() * 60,
+                    a: 0.4 + Math.random() * 0.3
+                },
+                // Glitch effect parameters
+                glitchIntensity: 1.0,
+                glitchPhase: Math.random() * Math.PI * 2,
+                glitchSegments: 3 + Math.floor(Math.random() * 5),
+                // Growth particles
+                particles: []
+            };
+            
+            // Create initial growth particles
+            for (let i = 0; i < 15; i++) {
+                seed.particles.push({
+                    x: 0,
+                    y: 0,
+                    z: 0,
+                    speed: 5 + Math.random() * 15,
+                    angle: Math.random() * Math.PI * 2,
+                    verticalSpeed: -10 - Math.random() * 20,
+                    size: 2 + Math.random() * 3,
+                    opacity: 0.7 + Math.random() * 0.3,
+                    life: 1.0,
+                    color: {
+                        r: seed.color.r + 80 + Math.random() * 40,
+                        g: seed.color.g + 100 + Math.random() * 40,
+                        b: seed.color.b + 100 + Math.random() * 40
+                    }
+                });
+            }
+            
+            // Add to seeds array
+            digitalSeeds.push(seed);
+            
+            // Create binary code particles for artistic effect
+            createBinaryBurstEffect(x, y, z, 20);
+        }
+        
+        // Function to create binary code burst effect
+        function createBinaryBurstEffect(x, y, z, count) {
+            for (let i = 0; i < count; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 20 + Math.random() * 80;
+                
+                const digit = Math.random() > 0.5 ? "1" : "0";
+                const size = 10 + Math.random() * 15;
+                
+                releaseParticles.push({
+                    x, y, z,
+                    dirX: Math.cos(angle) * (Math.random() * 0.8 + 0.2),
+                    dirY: Math.sin(angle) * (Math.random() * 0.8 + 0.2) - Math.random() * 0.5, // Bias upward
+                    dirZ: Math.sin(angle) * (Math.random() * 0.8 + 0.2),
+                    speed: speed,
+                    size: size,
+                    text: digit,
+                    color: {
+                        r: 100 + Math.random() * 155,
+                        g: 200 + Math.random() * 55,
+                        b: 255,
+                        a: 0.8 + Math.random() * 0.2
+                    },
+                    life: 1 + Math.random() * 1.5,
+                    gravity: 5 + Math.random() * 5,
+                    rotation: Math.random() * Math.PI * 2,
+                    rotationSpeed: (Math.random() - 0.5) * 2
+                });
+            }
+        }
+        
+        // Create a binary code ash particle
+        function createBinaryAshParticle(x, y, z, baseColor) {
+            const isBinary = Math.random() > 0.3;
+            
+            if (isBinary) {
+                // Binary digit particle (0 or 1)
+                const digit = Math.random() > 0.5 ? "1" : "0";
+                
+                disintegrationParticles.push({
+                    x, y, z,
+                    dirX: (Math.random() - 0.5) * 2,
+                    dirY: -Math.random() * 3 - 1, // Mostly upward
+                    dirZ: (Math.random() - 0.5) * 2,
+                    speed: 20 + Math.random() * 50,
+                    size: 10 + Math.random() * 15,
+                    text: digit,
+                    color: {
+                        r: baseColor.r + 50 + Math.random() * 80,
+                        g: baseColor.g + 70 + Math.random() * 60,
+                        b: baseColor.b + 100 + Math.random() * 50,
+                        a: 0.8 + Math.random() * 0.2
+                    },
+                    life: 1 + Math.random() * 2,
+                    gravity: 2 + Math.random() * 5,
+                    rotation: Math.random() * Math.PI * 2,
+                    rotationSpeed: (Math.random() - 0.5) * 3
+                });
+            } else {
+                // Regular ash particle
+                disintegrationParticles.push({
+                    x, y, z,
+                    dirX: (Math.random() - 0.5) * 2,
+                    dirY: -Math.random() * 2 - 0.5,
+                    dirZ: (Math.random() - 0.5) * 2,
+                    speed: 10 + Math.random() * 40,
+                    size: 3 + Math.random() * 5,
+                    color: {
+                        r: baseColor.r + 30 + Math.random() * 40,
+                        g: baseColor.g + 50 + Math.random() * 40,
+                        b: baseColor.b + 70 + Math.random() * 40,
+                        a: 0.6 + Math.random() * 0.4
+                    },
+                    life: 1 + Math.random() * 1.5,
+                    gravity: 1 + Math.random() * 3
+                });
+            }
+        }
+        
+        // Create a glowing ash particle (for spirits and leaves)
+        function createGlowingAshParticle(x, y, z, color) {
+            disintegrationParticles.push({
+                x, y, z,
+                dirX: (Math.random() - 0.5) * 3,
+                dirY: -Math.random() * 3 - 1,
+                dirZ: (Math.random() - 0.5) * 3,
+                speed: 30 + Math.random() * 60,
+                size: 5 + Math.random() * 10,
+                glow: true,
+                color: {
+                    r: color.r + Math.random() * 30,
+                    g: color.g + Math.random() * 30,
+                    b: color.b + Math.random() * 30,
+                    a: color.a || 0.8
+                },
+                life: 1.5 + Math.random() * 2,
+                gravity: 0.5 + Math.random() * 2
+            });
+        }
+        
+        // Update and draw disintegration particles
+        function updateDisintegrationParticles() {
+            for (let i = disintegrationParticles.length - 1; i >= 0; i--) {
+                const particle = disintegrationParticles[i];
+                
+                // Update position
+                particle.x += particle.dirX * particle.speed * deltaTime;
+                particle.y += particle.dirY * particle.speed * deltaTime;
+                particle.z += particle.dirZ * particle.speed * deltaTime;
+                
+                // Apply gravity
+                particle.dirY += particle.gravity * deltaTime;
+                
+                // Update life
+                particle.life -= deltaTime;
+                
+                // Remove if expired
+                if (particle.life <= 0) {
+                    disintegrationParticles.splice(i, 1);
+                    continue;
+                }
+                
+                // Draw particle
+                const proj = project3D(particle.x, particle.y, particle.z);
+                const size = particle.size * proj.factor;
+                
+                // Fade out as life decreases
+                const alpha = particle.color.a * (particle.life / 2);
+                
+                if (particle.text) {
+                    // Update rotation for text particles
+                    if (particle.rotationSpeed) {
+                        particle.rotation += particle.rotationSpeed * deltaTime;
+                    }
+                    
+                    // Draw text
+                    ctx.save();
+                    ctx.translate(proj.x, proj.y);
+                    ctx.rotate(particle.rotation);
+                    
+                    ctx.font = `${Math.floor(size)}px monospace`;
+                    ctx.fillStyle = `rgba(${particle.color.r}, ${particle.color.g}, ${particle.color.b}, ${alpha})`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(particle.text, 0, 0);
+                    
+                    ctx.restore();
+                } else if (particle.glow) {
+                    // Draw glowing particle
+                    // Main particle
+                    ctx.beginPath();
+                    ctx.arc(proj.x, proj.y, size, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(${particle.color.r}, ${particle.color.g}, ${particle.color.b}, ${alpha})`;
+                    ctx.fill();
+                    
+                    // Glow effect
+                    ctx.beginPath();
+                    ctx.arc(proj.x, proj.y, size * 3, 0, Math.PI * 2);
+                    const glowGradient = ctx.createRadialGradient(
+                        proj.x, proj.y, size * 0.5,
+                        proj.x, proj.y, size * 3
+                    );
+                    glowGradient.addColorStop(0, `rgba(${particle.color.r}, ${particle.color.g}, ${particle.color.b}, ${alpha * 0.7})`);
+                    glowGradient.addColorStop(1, `rgba(${particle.color.r}, ${particle.color.g}, ${particle.color.b}, 0)`);
+                    
+                    ctx.fillStyle = glowGradient;
+                    ctx.fill();
+                } else {
+                    // Regular particle
+                    ctx.beginPath();
+                    ctx.arc(proj.x, proj.y, size, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(${particle.color.r}, ${particle.color.g}, ${particle.color.b}, ${alpha})`;
+                    ctx.fill();
+                    
+                    // Simple glow
+                    ctx.beginPath();
+                    ctx.arc(proj.x, proj.y, size * 2, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(${particle.color.r}, ${particle.color.g}, ${particle.color.b}, ${alpha * 0.3})`;
+                    ctx.fill();
+                }
             }
         }
         
@@ -956,17 +1419,349 @@
                 // Fade out as life decreases
                 const alpha = particle.color.a * (particle.life / 3);
                 
-                ctx.beginPath();
-                ctx.arc(proj.x, proj.y, size, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(${particle.color.r}, ${particle.color.g}, ${particle.color.b}, ${alpha})`;
-                ctx.fill();
-                
-                // Add glow
-                ctx.beginPath();
-                ctx.arc(proj.x, proj.y, size * 2, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(${particle.color.r}, ${particle.color.g}, ${particle.color.b}, ${alpha * 0.3})`;
-                ctx.fill();
+                // Check if this is a text particle (binary) or regular particle
+                if (particle.text) {
+                    // Update rotation
+                    particle.rotation += particle.rotationSpeed * deltaTime;
+                    
+                    // Draw text
+                    ctx.save();
+                    ctx.translate(proj.x, proj.y);
+                    ctx.rotate(particle.rotation);
+                    
+                    ctx.font = `${Math.floor(size)}px monospace`;
+                    ctx.fillStyle = `rgba(${particle.color.r}, ${particle.color.g}, ${particle.color.b}, ${alpha})`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(particle.text, 0, 0);
+                    
+                    ctx.restore();
+                } else {
+                    // Draw regular particle
+                    ctx.beginPath();
+                    ctx.arc(proj.x, proj.y, size, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(${particle.color.r}, ${particle.color.g}, ${particle.color.b}, ${alpha})`;
+                    ctx.fill();
+                    
+                    // Add glow
+                    ctx.beginPath();
+                    ctx.arc(proj.x, proj.y, size * 2, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(${particle.color.r}, ${particle.color.g}, ${particle.color.b}, ${alpha * 0.3})`;
+                    ctx.fill();
+                }
             }
+        }
+        
+        // Update digital seeds growth
+        function updateDigitalSeeds() {
+            for (let i = digitalSeeds.length - 1; i >= 0; i--) {
+                const seed = digitalSeeds[i];
+                
+                // Update growth progress
+                seed.growthProgress += seed.growthRate * deltaTime;
+                
+                // Update growth stage based on progress
+                if (seed.growthProgress >= 1.0 && seed.growthStage === 0) {
+                    // Transition from seed to sapling
+                    seed.growthStage = 1;
+                    seed.growthProgress = 0;
+                    
+                    // More growth particles when reaching sapling stage
+                    createBinaryBurstEffect(seed.x, seed.y - 50, seed.z, 15);
+                } else if (seed.growthProgress >= 1.0 && seed.growthStage === 1) {
+                    // Transition from sapling to full tree
+                    seed.growthStage = 2;
+                    
+                    // Convert to a full tree and add to dataTrees
+                    const newTree = {
+                        id: seed.id,
+                        x: seed.x,
+                        y: seed.y,
+                        z: seed.z,
+                        height: seed.finalHeight,
+                        width: seed.finalWidth,
+                        color: seed.color,
+                        // Animation parameters
+                        rotation: Math.random() * Math.PI * 2,
+                        rotationSpeed: (Math.random() - 0.5) * 0.08, // Slower, more elegant rotation
+                        pulsePhase: seed.pulsePhase,
+                        hoverOffset: 0,
+                        // Tree characteristics
+                        branches: [],
+                        leaves: [],
+                        // Ghost effect 
+                        ghostLayers: 2 + Math.floor(Math.random() * 3),
+                        ghostAlpha: 0.25 + Math.random() * 0.3, // Slightly more visible ghost effect
+                        // Digital "spirits" trapped in the tree
+                        spirits: [],
+                        spiritCount: Math.floor(Math.random() * 4) + 2, // Slightly fewer spirits for cleaner look
+                        // Interaction state
+                        isSelected: false,
+                        selectionIntensity: 0,
+                        // Light effects
+                        glowIntensity: 0.6 + Math.random() * 0.5, // Increased base glow
+                        glowColor: {
+                            r: 150 + Math.random() * 50,
+                            g: 200 + Math.random() * 55,
+                            b: 255,
+                        }
+                    };
+                    
+                    // Generate branches, leaves, and spirits with artistic spacing
+                    generateBranches(newTree);
+                    generateLeaves(newTree); // This will use our improved leaf distribution
+                    generateSpirits(newTree);
+                    
+                    // Add to trees array
+                    dataTrees.push(newTree);
+                    
+                    // Final growth burst
+                    createBinaryBurstEffect(seed.x, seed.y - seed.finalHeight/2, seed.z, 30);
+                    
+                    // Remove seed
+                    digitalSeeds.splice(i, 1);
+                    
+                    // Update connections
+                    createConnections();
+                    continue;
+                }
+                
+                // Update seed particles
+                for (let j = seed.particles.length - 1; j >= 0; j--) {
+                    const particle = seed.particles[j];
+                    
+                    // Update position based on current growth stage
+                    if (seed.growthStage === 0) {
+                        // Seed stage - particles converge and hover
+                        particle.x += Math.cos(particle.angle) * particle.speed * deltaTime;
+                        particle.y += particle.verticalSpeed * deltaTime;
+                        particle.z += Math.sin(particle.angle) * particle.speed * deltaTime;
+                        
+                        // Reduce outward speed
+                        particle.speed *= 0.95;
+                        particle.verticalSpeed *= 0.95;
+                        
+                        // Reduce life
+                        particle.life -= deltaTime * 0.5;
+                    } else if (seed.growthStage === 1) {
+                        // Sapling stage - particles move upward
+                        particle.verticalSpeed = -30 - Math.random() * 20;
+                        particle.y += particle.verticalSpeed * deltaTime;
+                        
+                        // Reduce life faster
+                        particle.life -= deltaTime;
+                    }
+                    
+                    // Remove dead particles
+                    if (particle.life <= 0) {
+                        seed.particles.splice(j, 1);
+                        continue;
+                    }
+                    
+                    // Create new particles if needed
+                    if (seed.particles.length < 10 && Math.random() < 0.1) {
+                        seed.particles.push({
+                            x: 0,
+                            y: 0,
+                            z: 0,
+                            speed: 5 + Math.random() * 15,
+                            angle: Math.random() * Math.PI * 2,
+                            verticalSpeed: -10 - Math.random() * 20,
+                            size: 2 + Math.random() * 3,
+                            opacity: 0.7 + Math.random() * 0.3,
+                            life: 1.0,
+                            color: {
+                                r: seed.color.r + 80 + Math.random() * 40,
+                                g: seed.color.g + 100 + Math.random() * 40,
+                                b: seed.color.b + 100 + Math.random() * 40
+                            }
+                        });
+                    }
+                }
+            }
+        }
+        
+        // Draw digital seeds in different growth stages
+        function drawDigitalSeeds() {
+            digitalSeeds.forEach(seed => {
+                // Project position
+                const baseProj = project3D(seed.x, seed.y, seed.z);
+                
+                // Apply glitch effect timing
+                const glitchTime = time * 3 + seed.glitchPhase;
+                const glitchOffset = seed.glitchIntensity * (1.0 - seed.growthProgress * 0.3);
+                
+                if (seed.growthStage === 0) {
+                    // Draw seed stage - a small glitching sphere
+                    const seedSize = 5 + seed.growthProgress * 15;
+                    const pulse = Math.sin(time * 3 + seed.pulsePhase) * 0.2 + 0.8;
+                    
+                    // Draw glitched seed with segments
+                    for (let i = 0; i < seed.glitchSegments; i++) {
+                        const segmentAngle = (i / seed.glitchSegments) * Math.PI * 2;
+                        const offsetX = Math.sin(glitchTime + segmentAngle) * glitchOffset * seedSize * 0.3;
+                        const offsetY = Math.cos(glitchTime + segmentAngle) * glitchOffset * seedSize * 0.3;
+                        
+                        ctx.beginPath();
+                        ctx.arc(
+                            baseProj.x + offsetX, 
+                            baseProj.y + offsetY, 
+                            seedSize * baseProj.factor * pulse, 
+                            segmentAngle, 
+                            segmentAngle + (Math.PI * 2 / seed.glitchSegments)
+                        );
+                        ctx.lineTo(baseProj.x, baseProj.y);
+                        ctx.closePath();
+                        
+                        // Use gradient fill
+                        const gradient = ctx.createRadialGradient(
+                            baseProj.x, baseProj.y, 0,
+                            baseProj.x, baseProj.y, seedSize * baseProj.factor
+                        );
+                        gradient.addColorStop(0, `rgba(${seed.color.r + 100}, ${seed.color.g + 100}, ${seed.color.b + 100}, ${seed.color.a * pulse})`);
+                        gradient.addColorStop(1, `rgba(${seed.color.r}, ${seed.color.g}, ${seed.color.b}, ${seed.color.a * 0.5 * pulse})`);
+                        
+                        ctx.fillStyle = gradient;
+                        ctx.fill();
+                        
+                        // Draw segment borders for digital look
+                        ctx.strokeStyle = `rgba(${seed.color.r + 100}, ${seed.color.g + 150}, ${seed.color.b + 150}, ${seed.color.a * pulse})`;
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    }
+                    
+                    // Add a data core in the center
+                    ctx.beginPath();
+                    ctx.arc(baseProj.x, baseProj.y, seedSize * 0.3 * baseProj.factor, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(200, 230, 255, ${0.7 * pulse})`;
+                    ctx.fill();
+                } else if (seed.growthStage === 1) {
+                    // Draw sapling stage - taller, thin structure with branching beginning
+                    const saplingHeight = seed.finalHeight * 0.6 * seed.growthProgress;
+                    const saplingWidth = seed.finalWidth * 0.5;
+                    
+                    // Project top position
+                    const topY = seed.y - saplingHeight;
+                    const topProj = project3D(seed.x, topY, seed.z);
+                    
+                    // Calculate scaled width
+                    const scaledWidth = saplingWidth * baseProj.factor;
+                    
+                    // Draw stylized sapling trunk with glitch segments
+                    for (let i = 0; i < seed.glitchSegments; i++) {
+                        const heightSegment = i / seed.glitchSegments;
+                        const nextHeightSegment = (i + 1) / seed.glitchSegments;
+                        
+                        // Calculate segment points with glitch offset
+                        const segStartY = seed.y - saplingHeight * heightSegment;
+                        const segEndY = seed.y - saplingHeight * nextHeightSegment;
+                        
+                        const glitchOffsetX = Math.sin(glitchTime * (1 + heightSegment) + i) * glitchOffset * 10;
+                        
+                        const segStartProj = project3D(
+                            seed.x + glitchOffsetX * heightSegment, 
+                            segStartY, 
+                            seed.z
+                        );
+                        const segEndProj = project3D(
+                            seed.x + glitchOffsetX * nextHeightSegment, 
+                            segEndY, 
+                            seed.z
+                        );
+                        
+                        // Width varies along height
+                        const startWidth = scaledWidth * (1 - heightSegment * 0.3);
+                        const endWidth = scaledWidth * (1 - nextHeightSegment * 0.4);
+                        
+                        // Draw segment
+                        ctx.beginPath();
+                        ctx.moveTo(segStartProj.x - startWidth/2, segStartProj.y);
+                        ctx.lineTo(segStartProj.x + startWidth/2, segStartProj.y);
+                        ctx.lineTo(segEndProj.x + endWidth/2, segEndProj.y);
+                        ctx.lineTo(segEndProj.x - endWidth/2, segEndProj.y);
+                        ctx.closePath();
+                        
+                        // Create gradient
+                        const gradient = ctx.createLinearGradient(
+                            segStartProj.x, segStartProj.y,
+                            segEndProj.x, segEndProj.y
+                        );
+                        gradient.addColorStop(0, `rgba(${seed.color.r}, ${seed.color.g}, ${seed.color.b}, ${seed.color.a})`);
+                        gradient.addColorStop(1, `rgba(${seed.color.r + 20}, ${seed.color.g + 30}, ${seed.color.b + 50}, ${seed.color.a * 0.7})`);
+                        
+                        ctx.fillStyle = gradient;
+                        ctx.fill();
+                        
+                        // Digital edge effect
+                        ctx.strokeStyle = `rgba(${seed.color.r + 50}, ${seed.color.g + 100}, ${seed.color.b + 120}, 0.6)`;
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                        
+                        // Digital circuit lines along trunk
+                        if (i % 2 === 0) {
+                            ctx.beginPath();
+                            ctx.moveTo(segStartProj.x, segStartProj.y);
+                            ctx.lineTo(segEndProj.x, segEndProj.y);
+                            ctx.strokeStyle = `rgba(150, 220, 255, 0.6)`;
+                            ctx.lineWidth = 1;
+                            ctx.stroke();
+                        }
+                    }
+                    
+                    // Draw a few proto-branches
+                    const numProtoBranches = 2 + Math.floor(seed.growthProgress * 3);
+                    for (let i = 0; i < numProtoBranches; i++) {
+                        const heightPercent = 0.5 + (i / numProtoBranches) * 0.5;
+                        const branchY = seed.y - saplingHeight * heightPercent;
+                        const branchProj = project3D(seed.x, branchY, seed.z);
+                        
+                        const angle = (i / numProtoBranches) * Math.PI * 2;
+                        const length = scaledWidth * (1 + seed.growthProgress);
+                        
+                        const endX = branchProj.x + Math.cos(angle) * length;
+                        const endY = branchProj.y + Math.sin(angle) * length * 0.3;
+                        
+                        // Draw branch with digital effect
+                        ctx.beginPath();
+                        ctx.moveTo(branchProj.x, branchProj.y);
+                        ctx.lineTo(endX, endY);
+                        ctx.strokeStyle = `rgba(${seed.color.r + 40}, ${seed.color.g + 70}, ${seed.color.b + 90}, 0.7)`;
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                        
+                        // Add small glow
+                        ctx.shadowColor = `rgba(150, 220, 255, 0.5)`;
+                        ctx.shadowBlur = 5;
+                        ctx.stroke();
+                        ctx.shadowBlur = 0;
+                    }
+                }
+                
+                // Draw particles for all stages
+                seed.particles.forEach(particle => {
+                    const particleX = seed.x + particle.x;
+                    const particleY = seed.y + particle.y;
+                    const particleZ = seed.z + particle.z;
+                    
+                    const particleProj = project3D(particleX, particleY, particleZ);
+                    const size = particle.size * particleProj.factor;
+                    
+                    // Fade based on life
+                    const alpha = particle.opacity * particle.life;
+                    
+                    // Draw particle
+                    ctx.beginPath();
+                    ctx.arc(particleProj.x, particleProj.y, size, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(${particle.color.r}, ${particle.color.g}, ${particle.color.b}, ${alpha})`;
+                    ctx.fill();
+                    
+                    // Add glow
+                    ctx.beginPath();
+                    ctx.arc(particleProj.x, particleProj.y, size * 2, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(${particle.color.r}, ${particle.color.g}, ${particle.color.b}, ${alpha * 0.3})`;
+                    ctx.fill();
+                });
+            });
         }
         
         // Main animation loop
@@ -1010,9 +1805,21 @@
             // Update and draw release particles
             updateReleaseParticles();
             
+            // Update and draw digital seeds
+            updateDigitalSeeds();
+            drawDigitalSeeds();
+            
+            // Update and draw disintegration particles
+            updateDisintegrationParticles();
+            
             // Draw hand landmarks if available (for debugging/feedback)
             if (handLandmarks && handLandmarks.length > 0) {
                 drawHandLandmarks();
+            }
+            
+            // Create occasional shooting stars for better ambience in empty forest
+            if (dataTrees.length === 0 && Math.random() < 0.02) {
+                createShootingStar();
             }
         }
         
@@ -1683,17 +2490,26 @@
             // Add hover animation effect
             const hoverOffset = tree.hoverOffset * (1 - leaf.position.h / tree.height);
             
-            // Simpler hover animation
+            // Graceful hover animation
             const leafHover = Math.sin(time * leaf.hoverFrequency + leaf.pulsePhase) * leaf.hoverAmplitude;
             
             // Project to screen space
             const proj = project3D(x, y, z);
             
-            // Calculate size based on distance
-            const size = leaf.size * scaleFactor;
+            // Calculate size based on distance - make leaves larger for better clarity
+            const size = leaf.size * scaleFactor * 1.2;
             
             // Calculate rotation (combine base rotation with animation)
             leaf.currentRotation += leaf.rotationSpeed * deltaTime;
+            
+            // Limit rotation to maxRotation (default: 45 degrees) to ensure readability
+            const maxRotation = leaf.maxRotation || Math.PI / 4; // 45 degrees
+            if (Math.abs(leaf.currentRotation) > maxRotation) {
+                // If exceeded, reset to max value with the same sign
+                leaf.currentRotation = Math.sign(leaf.currentRotation) * maxRotation;
+                // And reverse direction
+                leaf.rotationSpeed = -leaf.rotationSpeed;
+            }
             
             // Pulse animation for opacity
             const pulse = Math.sin(time * 0.5 + leaf.pulsePhase) * 0.1 + 0.9;
@@ -1710,22 +2526,22 @@
             ctx.translate(proj.x, proj.y + hoverOffset + leafHover);
             ctx.rotate(leaf.currentRotation);
             
-            // Use global alpha for overall opacity
-            const baseOpacity = leaf.opacity * pulse;
+            // Use global alpha for overall opacity - increase base opacity for better visibility
+            const baseOpacity = Math.min(1.0, leaf.opacity * 1.2) * pulse;
             ctx.globalAlpha = baseOpacity;
             
             // Draw the leaf image
             const leafImage = leafImages[leaf.imageIndex];
             
-            // Simplified drawing with tint
+            // Improved drawing with less transparent tint
             if (leaf.tint && leaf.tint.strength > 0) {
                 // Apply tint using globalCompositeOperation for better performance
                 ctx.globalCompositeOperation = 'source-over';
                 ctx.drawImage(leafImage, -size/2, -size/2, size, size);
                 
-                // Overlay tint color
+                // Overlay tint color with reduced strength for better clarity
                 ctx.globalCompositeOperation = 'overlay';
-                ctx.fillStyle = `rgba(${leaf.tint.r}, ${leaf.tint.g}, ${leaf.tint.b}, ${leaf.tint.strength})`;
+                ctx.fillStyle = `rgba(${leaf.tint.r}, ${leaf.tint.g}, ${leaf.tint.b}, ${leaf.tint.strength * 0.7})`;
                 ctx.fillRect(-size/2, -size/2, size, size);
                 
                 // Reset composite operation
@@ -1735,14 +2551,14 @@
                 ctx.drawImage(leafImage, -size/2, -size/2, size, size);
             }
             
-            // Add a single subtle glow effect - use lighter on smaller screens for performance
+            // Add a subtle glow effect
             if (size > 20) {
                 ctx.globalAlpha = baseOpacity * 0.3;
-                ctx.filter = 'blur(5px)';
+                ctx.filter = 'blur(3px)'; // Further reduced blur for sharper appearance
                 ctx.drawImage(
                     leafImage, 
-                    -size/2 - 10, -size/2 - 10, 
-                    size + 20, size + 20
+                    -size/2 - 8, -size/2 - 8, 
+                    size + 16, size + 16
                 );
             }
             
@@ -1885,6 +2701,32 @@
         
         // Start animation
         requestAnimationFrame(animate);
+        
+        // Add initial entrance animation for empty forest
+        function createEntranceEffect() {
+            // Create constellation-like formations
+            setTimeout(() => {
+                for (let i = 0; i < 5; i++) {
+                    setTimeout(() => {
+                        const angle = (i / 5) * Math.PI * 2;
+                        const distance = 300 + Math.random() * 200;
+                        const x = Math.cos(angle) * distance;
+                        const y = Math.sin(angle) * distance * 0.5;
+                        const z = 600 + Math.random() * 200;
+                        
+                        createBinaryBurstEffect(x, y, z, 15);
+                        
+                        // Create shooting stars
+                        if (Math.random() > 0.5) {
+                            createShootingStar();
+                        }
+                    }, i * 500);
+                }
+            }, 2000);
+        }
+        
+        // Call entrance effect after loading
+        createEntranceEffect();
     </script>
 </body>
 </html> 
