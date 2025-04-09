@@ -1058,7 +1058,7 @@
             // Update collapse sequence if active
             if (collapsePhase > 0) {
                 try {
-                    updateCollapseSequence();
+                updateCollapseSequence();
                 } catch (e) {
                     // If any error occurs during collapse animation, force transition
                     console.error("Error in collapse sequence:", e);
@@ -1089,7 +1089,7 @@
             } else if (collapsePhase > 0) {
                 // Draw collapse sequence
                 try {
-                    drawCollapseSequence();
+                drawCollapseSequence();
                 } catch (e) {
                     // If any error occurs during collapse drawing, force transition
                     console.error("Error drawing collapse sequence:", e);
@@ -1148,14 +1148,14 @@
                 if (phaseElapsedTime > phaseTimeout) {
                     console.log(`Safety timeout: Collapse phase ${collapsePhase} running too long, forcing transition`);
                     safeRedirect();
-                    return; // Stop animation immediately
+                return; // Stop animation immediately
                 }
             }
             
             // Continue animation only if not redirecting
             if (!window.redirectInProgress) {
                 try {
-                    requestAnimationFrame(animate);
+                requestAnimationFrame(animate);
                 } catch (e) {
                     console.error("Error requesting animation frame:", e);
                     safeRedirect();
@@ -1207,16 +1207,16 @@
                 connections.length = 0;
                 prisms.length = 0;
                 shards.length = 0;
-                
-                // Add meta refresh as immediate fallback
-                const meta = document.createElement('meta');
-                meta.httpEquiv = 'refresh';
-                meta.content = '0;url=/scene-four';
-                document.head.appendChild(meta);
-                
+            
+            // Add meta refresh as immediate fallback
+            const meta = document.createElement('meta');
+            meta.httpEquiv = 'refresh';
+            meta.content = '0;url=/scene-four';
+            document.head.appendChild(meta);
+            
                 // Use both setTimeout and direct navigation for redundancy
                 setTimeout(() => {
-                    window.location.href = '/scene-four';
+            window.location.href = '/scene-four';
                 }, 0);
                 
                 // Direct immediate navigation
@@ -3401,50 +3401,50 @@
             if (window.redirectInProgress) return; // Don't update if redirect in progress
             
             try {
-                const elapsedTime = time - collapseStartTime;
-                
+            const elapsedTime = time - collapseStartTime;
+            
                 // Phase transitions based on extended timing for longer animation (10+ seconds)
-                if (collapsePhase === 1 && elapsedTime > 3) {
-                    // After overload phase, move to face flashes
-                    collapsePhase = 2;
-                    // Generate face flashes
-                    generateFaceFlashes();
-                } else if (collapsePhase === 2 && elapsedTime > 6) {
-                    // After face flashes, move to shattering
-                    collapsePhase = 3;
-                    generateShards();
-                } else if (collapsePhase === 3 && elapsedTime > 10) {
-                    // After shattering, move to fluid phase
-                    collapsePhase = 4;
-                    collapseProgress = 0;  // Reset progress for fluid animation
+            if (collapsePhase === 1 && elapsedTime > 3) {
+                // After overload phase, move to face flashes
+                collapsePhase = 2;
+                // Generate face flashes
+                generateFaceFlashes();
+            } else if (collapsePhase === 2 && elapsedTime > 6) {
+                // After face flashes, move to shattering
+                collapsePhase = 3;
+                generateShards();
+            } else if (collapsePhase === 3 && elapsedTime > 10) {
+                // After shattering, move to fluid phase
+                collapsePhase = 4;
+                collapseProgress = 0;  // Reset progress for fluid animation
                 } else if (collapsePhase === 4 && elapsedTime > 22 && !window.redirectInProgress) {
                     // Extended fluid phase from 15 to 22 seconds for a longer, more artistic transition
-                    console.log("Fluid phase complete - initiating redirect");
-                    
-                    // Set all flags to prevent any other redirects
-                    window.redirectInProgress = true;
-                    nextSceneRedirect = true;
-                    redirectInitiated = true;
-                    
+                console.log("Fluid phase complete - initiating redirect");
+                
+                // Set all flags to prevent any other redirects
+                window.redirectInProgress = true;
+                nextSceneRedirect = true;
+                redirectInitiated = true;
+                
                     // Use safe redirect function instead of direct navigation
                     safeRedirect();
                     return;
-                }
-                
-                // Update based on current phase
-                switch (collapsePhase) {
-                    case 1: // Overload phase - update overload effects
-                        updateOverloadEffects(elapsedTime);
-                        break;
-                    case 2: // Faces phase - update face flashes
-                        updateFaceFlashes(elapsedTime);
-                        break;
-                    case 3: // Shards phase - update shards
-                        updateShards(elapsedTime);
-                        break;
-                    case 4: // Fluid phase - update mercury fluid
-                        updateFluidPhase(elapsedTime);
-                        break;
+            }
+            
+            // Update based on current phase
+            switch (collapsePhase) {
+                case 1: // Overload phase - update overload effects
+                    updateOverloadEffects(elapsedTime);
+                    break;
+                case 2: // Faces phase - update face flashes
+                    updateFaceFlashes(elapsedTime);
+                    break;
+                case 3: // Shards phase - update shards
+                    updateShards(elapsedTime);
+                    break;
+                case 4: // Fluid phase - update mercury fluid
+                    updateFluidPhase(elapsedTime);
+                    break;
                 }
             } catch (e) {
                 console.error("Error in updateCollapseSequence:", e);
@@ -4220,16 +4220,16 @@
                         }
                     } else if (particle.type === 'shockwave') {
                         // Draw shockwave effect
-                        if (time >= particle.startTime) {
-                            const age = time - particle.startTime;
-                            const progress = Math.min(1, age / (particle.life / particle.decay));
-                            
-                            // Radius expands over time
-                            const radius = particle.radius + progress * (particle.maxRadius - particle.radius);
-                            
-                            ctx.save();
-                            ctx.beginPath();
-                            ctx.arc(particle.x, particle.y, radius, 0, Math.PI * 2);
+                    if (time >= particle.startTime) {
+                        const age = time - particle.startTime;
+                        const progress = Math.min(1, age / (particle.life / particle.decay));
+                        
+                        // Radius expands over time
+                        const radius = particle.radius + progress * (particle.maxRadius - particle.radius);
+                        
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.arc(particle.x, particle.y, radius, 0, Math.PI * 2);
                             
                             // Create gradient for more dramatic effect
                             const gradient = ctx.createRadialGradient(
@@ -4244,14 +4244,14 @@
                             
                             ctx.strokeStyle = gradient;
                             ctx.lineWidth = particle.thickness * (1 - progress * 0.5);
-                            ctx.stroke();
-                            ctx.restore();
-                            
-                            // Remove if completed
-                            if (progress >= 1) {
-                                particles.splice(i, 1);
-                            }
+                        ctx.stroke();
+                        ctx.restore();
+                        
+                        // Remove if completed
+                        if (progress >= 1) {
+                            particles.splice(i, 1);
                         }
+                    }
                     } else if (particle.isExplosion) {
                         // Draw explosion particles
                         const x = particle.x - cameraX;
@@ -4308,13 +4308,13 @@
                         ctx.fill();
                         
                         ctx.restore();
-                    } else if (particle.isBubble) {
+                } else if (particle.isBubble) {
                         // Draw mercury bubbles with enhanced effects
                         const drawX = particle.x - cameraX;
                         const drawY = particle.y - cameraY;
-                        
-                        ctx.save();
-                        ctx.beginPath();
+                    
+                    ctx.save();
+                    ctx.beginPath();
                         
                         // Distort bubbles with chaos
                         if (chaosLevel > 0.7 && Math.random() > 0.7) {
@@ -4326,7 +4326,7 @@
                                 chaosLevel * 0.3
                             );
                         } else {
-                            ctx.arc(drawX, drawY, particle.size, 0, Math.PI * 2);
+                    ctx.arc(drawX, drawY, particle.size, 0, Math.PI * 2);
                         }
                         
                         // Color shifts with chaos
@@ -4341,30 +4341,30 @@
                         }
                         
                         ctx.fillStyle = bubbleColor;
-                        ctx.fill();
-                        
-                        // Add highlight
-                        ctx.beginPath();
-                        ctx.arc(
-                            drawX - particle.size * 0.3, 
-                            drawY - particle.size * 0.3, 
-                            particle.size * 0.4, 
-                            0, Math.PI * 2
-                        );
-                        ctx.fillStyle = `rgba(255, 255, 255, ${particle.alpha * particle.life * 0.7})`;
-                        ctx.fill();
-                        ctx.restore();
-                    }
+                    ctx.fill();
+                    
+                    // Add highlight
+                    ctx.beginPath();
+                    ctx.arc(
+                        drawX - particle.size * 0.3, 
+                        drawY - particle.size * 0.3, 
+                        particle.size * 0.4, 
+                        0, Math.PI * 2
+                    );
+                    ctx.fillStyle = `rgba(255, 255, 255, ${particle.alpha * particle.life * 0.7})`;
+                    ctx.fill();
+                    ctx.restore();
                 }
-                
-                // Fade in/out for transitions
+            }
+            
+            // Fade in/out for transitions
                 const elapsedTransitionTime = time - collapseStartTime;
                 if (elapsedTransitionTime > 18) { // Extended from 14 seconds
-                    // Fade out to transition to next scene
+                // Fade out to transition to next scene
                     const fadeProgress = Math.min(1, (elapsedTransitionTime - 18) * 0.5);
-                    ctx.fillStyle = `rgba(0, 0, 0, ${fadeProgress})`;
-                    ctx.fillRect(0, 0, canvas.width, canvas.height);
-                }
+                ctx.fillStyle = `rgba(0, 0, 0, ${fadeProgress})`;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
                 
                 // Draw zoom transition if active
                 if (window.zoomTransition && window.zoomTransition.active) {
@@ -4642,10 +4642,10 @@
             } else {
                 // Standard mercury gradient
                 gradient = ctx.createLinearGradient(0, poolTop, 0, canvas.height);
-                gradient.addColorStop(0, 'rgba(220, 220, 230, 1)');  // Light at surface
-                gradient.addColorStop(0.1, 'rgba(180, 180, 190, 1)');
-                gradient.addColorStop(0.5, 'rgba(120, 120, 130, 1)');
-                gradient.addColorStop(1, 'rgba(80, 80, 90, 1)');    // Darker at bottom
+            gradient.addColorStop(0, 'rgba(220, 220, 230, 1)');  // Light at surface
+            gradient.addColorStop(0.1, 'rgba(180, 180, 190, 1)');
+            gradient.addColorStop(0.5, 'rgba(120, 120, 130, 1)');
+            gradient.addColorStop(1, 'rgba(80, 80, 90, 1)');    // Darker at bottom
             }
             
             // Draw main pool
@@ -4714,7 +4714,7 @@
                 }
             } else {
                 // Standard surface with waves
-                ctx.fillRect(0, poolTop, canvas.width, poolHeight);
+            ctx.fillRect(0, poolTop, canvas.width, poolHeight);
             }
             
             // Draw surface highlights to create ripple effect
@@ -4749,9 +4749,9 @@
             } else {
                 // Standard surface highlight
                 surfaceGradient = ctx.createLinearGradient(0, poolTop - waveHeight, 0, poolTop + waveHeight * 2);
-                surfaceGradient.addColorStop(0, 'rgba(255, 255, 255, 0.2)');
-                surfaceGradient.addColorStop(0.5, 'rgba(200, 200, 210, 0.4)');
-                surfaceGradient.addColorStop(1, 'rgba(120, 120, 130, 0)');
+            surfaceGradient.addColorStop(0, 'rgba(255, 255, 255, 0.2)');
+            surfaceGradient.addColorStop(0.5, 'rgba(200, 200, 210, 0.4)');
+            surfaceGradient.addColorStop(1, 'rgba(120, 120, 130, 0)');
             }
             
             ctx.fillStyle = surfaceGradient;
@@ -4777,9 +4777,9 @@
                     highlightGradient.addColorStop(1, `hsla(${hue}, 100%, 60%, 0)`);
                 } else {
                     // Standard white highlights
-                    highlightGradient.addColorStop(0, 'rgba(255, 255, 255, 0.4)');
-                    highlightGradient.addColorStop(0.2, 'rgba(255, 255, 255, 0.1)');
-                    highlightGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                highlightGradient.addColorStop(0, 'rgba(255, 255, 255, 0.4)');
+                highlightGradient.addColorStop(0.2, 'rgba(255, 255, 255, 0.1)');
+                highlightGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
                 }
                 
                 ctx.fillStyle = highlightGradient;

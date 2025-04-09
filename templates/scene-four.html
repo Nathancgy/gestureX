@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GestureX - Scene Four</title>
+    <title>GestureX - Digital Forest</title>
     <style>
         body {
             margin: 0;
@@ -12,39 +12,1879 @@
             background-color: #000;
             font-family: 'Arial', sans-serif;
             color: #fff;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: black;
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            z-index: 100;
+            opacity: 1;
+            transition: opacity 2s ease-out;
         }
-        .message {
+        .loading.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .loading-text {
             font-size: 2rem;
-            letter-spacing: 0.3rem;
+            letter-spacing: 0.5rem;
+            color: rgba(120, 200, 255, 0.7);
             text-transform: uppercase;
+        }
+        .instructions {
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            border-top: 1px solid rgba(120, 200, 255, 0.3);
+            padding: 15px 0;
+            text-align: center;
             opacity: 0;
             animation: fade-in 3s ease-in forwards;
+            animation-delay: 3s;
         }
         @keyframes fade-in {
             0% { opacity: 0; }
             100% { opacity: 1; }
         }
+        .instruction-text {
+            max-width: 800px;
+            margin: 0 auto;
+            font-size: 1rem;
+            line-height: 1.6;
+            color: rgba(200, 230, 255, 0.8);
+        }
     </style>
 </head>
 <body>
-    <div class="message">Scene Four</div>
+    <div class="loading" id="loadingScreen">
+        <div class="loading-text">Entering Digital Forest</div>
+    </div>
+    
+    <canvas id="forestCanvas"></canvas>
+    
+    <div class="instructions">
+        <p class="instruction-text">Explore the petrified forest of data trees - monuments to digital ghosts of extinct species.</p>
+    </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script>
+        // Hide loading screen after 3 seconds
+        setTimeout(() => {
+            document.getElementById('loadingScreen').classList.add('hidden');
+        }, 3000);
+        
+        // Set up canvas
+        const canvas = document.getElementById('forestCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            // Recalculate positions when trees are implemented
+        });
+        
         // Connect to the WebSocket server
         const socket = io();
         
-        // Initialize basic setup
-        function init() {
-            console.log("Scene Four initialized");
+        // Hand landmark data and gesture state
+        let handLandmarks = null;
+        let currentGesture = '';
+        let lastGesture = '';
+        let handPosition = null;
+        
+        // Animation timing
+        let time = 0;
+        let lastFrameTime = 0;
+        let deltaTime = 0;
+        
+        // Camera/view parameters for 3D feeling
+        let cameraZ = 2000;
+        let cameraOffset = { x: 0, y: 0 };
+        let targetCameraOffset = { x: 0, y: 0 };
+        
+        // Interaction state
+        let lastInteractionTime = 0;
+        const INTERACTION_COOLDOWN = 1000; // ms between interactions
+        let growingSeed = null; // Track currently growing seed
+        let deletionEffect = null; // Track active deletion effect
+        
+        // Seed growth parameters
+        const SEED_GROWTH_DURATION = 2.5; // seconds to grow from seed to tree
+        const SEED_PHASES = ['seed', 'sprout', 'sapling', 'tree'];
+        
+        // Deletion effect parameters
+        const DELETION_DURATION = 2.0; // seconds for deletion animation
+        const DELETION_RADIUS = 150; // radius of deletion effect
+        const ASH_PARTICLES_COUNT = 150; // number of ash particles per tree deletion
+        
+        // Ash particles storage
+        const ashParticles = [];
+        
+        // Stars for background
+        const stars = [];
+        const numStars = 500;
+        
+        // Constellation elements for visual cohesion with hand tracking
+        const constellations = [];
+        const NUM_CONSTELLATIONS = 4; // Number of constellation formations
+        
+        // Initialize stars and constellation patterns
+        function initStars() {
+            // Initialize stars
+            for (let i = 0; i < numStars; i++) {
+                stars.push({
+                    x: (Math.random() - 0.5) * canvas.width * 3,
+                    y: (Math.random() - 0.5) * canvas.height * 3,
+                    z: Math.random() * 2000 + 500,
+                    radius: Math.random() * 1.5 + 0.5,
+                    color: {
+                        r: 180 + Math.random() * 75,
+                        g: 180 + Math.random() * 75,
+                        b: 220 + Math.random() * 35,
+                        a: 0.5 + Math.random() * 0.5
+                    }
+                });
+            }
+            
+            // Create constellation patterns
+            createConstellations();
         }
         
-        // Start initialization
-        init();
+        // Create constellation patterns similar to hand tracking visuals
+        function createConstellations() {
+            // Define constellation shapes
+            const shapes = [
+                // Simple triangle
+                [
+                    {x: -120, y: -100, z: 800, size: 3, isGold: true},
+                    {x: 120, y: -100, z: 800, size: 2.5, isGold: false},
+                    {x: 0, y: 100, z: 800, size: 3, isGold: true},
+                    // Connections: 0-1, 1-2, 2-0
+                    [[0, 1], [1, 2], [2, 0]]
+                ],
+                // Small dipper-like formation
+                [
+                    {x: -150, y: 0, z: 1200, size: 3, isGold: true},
+                    {x: -70, y: 30, z: 1200, size: 2, isGold: false},
+                    {x: 0, y: 0, z: 1200, size: 2.5, isGold: false},
+                    {x: 80, y: -40, z: 1200, size: 2, isGold: false},
+                    {x: 160, y: -100, z: 1200, size: 3, isGold: true},
+                    // Connections: 0-1-2-3-4
+                    [[0, 1], [1, 2], [2, 3], [3, 4]]
+                ],
+                // Square with center
+                [
+                    {x: -100, y: -100, z: 1500, size: 2.5, isGold: false},
+                    {x: 100, y: -100, z: 1500, size: 2.5, isGold: false},
+                    {x: 100, y: 100, z: 1500, size: 2.5, isGold: false},
+                    {x: -100, y: 100, z: 1500, size: 2.5, isGold: false},
+                    {x: 0, y: 0, z: 1500, size: 3, isGold: true},
+                    // Connections: square + lines to center
+                    [[0, 1], [1, 2], [2, 3], [3, 0], [0, 4], [1, 4], [2, 4], [3, 4]]
+                ],
+                // Pentagram-like shape
+                [
+                    {x: 0, y: -120, z: 900, size: 3, isGold: true},
+                    {x: 114, y: -37, z: 900, size: 2.5, isGold: false},
+                    {x: 70, y: 97, z: 900, size: 2.5, isGold: false},
+                    {x: -70, y: 97, z: 900, size: 2.5, isGold: false},
+                    {x: -114, y: -37, z: 900, size: 3, isGold: true},
+                    // Connections: pentagram pattern
+                    [[0, 2], [2, 4], [4, 1], [1, 3], [3, 0]]
+                ]
+            ];
+            
+            // Create constellations at different positions in the scene
+            for (let i = 0; i < NUM_CONSTELLATIONS; i++) {
+                // Pick a random constellation shape
+                const shapeIndex = Math.floor(Math.random() * shapes.length);
+                const shape = shapes[shapeIndex];
+                
+                // Random position and rotation offsets
+                const offsetX = (Math.random() - 0.5) * 1500;
+                const offsetY = (Math.random() - 0.5) * 1500;
+                const offsetZ = Math.random() * 1500 + 500;
+                const rotation = Math.random() * Math.PI * 2;
+                
+                // Create stars for this constellation
+                const stars = [];
+                const nodePoints = shape[0]; // Points before connections
+                
+                // Add stars with rotation applied
+                for (let j = 0; j < nodePoints.length; j++) {
+                    const point = nodePoints[j];
+                    // Apply rotation
+                    const rotatedX = point.x * Math.cos(rotation) - point.y * Math.sin(rotation);
+                    const rotatedY = point.x * Math.sin(rotation) + point.y * Math.cos(rotation);
+                    
+                    stars.push({
+                        x: offsetX + rotatedX,
+                        y: offsetY + rotatedY,
+                        z: offsetZ + point.z,
+                        size: point.size,
+                        isGold: point.isGold,
+                        pulsePhase: Math.random() * Math.PI * 2,
+                        pulseSpeed: 0.5 + Math.random() * 0.5
+                    });
+                }
+                
+                // Add connections
+                const connections = shape[shape.length - 1];
+                
+                // Add constellation to array
+                constellations.push({
+                    stars,
+                    connections,
+                    pulsePhase: Math.random() * Math.PI * 2,
+                    pulseSpeed: 0.2 + Math.random() * 0.3
+                });
+            }
+        }
+        
+        // 3D projection functions
+        function project3D(x, y, z) {
+            const factor = cameraZ / (z + cameraZ);
+            const projectedX = x * factor + canvas.width / 2 + cameraOffset.x;
+            const projectedY = y * factor + canvas.height / 2 + cameraOffset.y;
+            return { x: projectedX, y: projectedY, factor: factor };
+        }
+        
+        // Data Trees
+        const dataTrees = [];
+        const connections = [];
+        const leafImages = [];
+        const NUM_TREES = 8; // Total number of trees to create
+        
+        // Load leaf images
+        function preloadLeafImages() {
+            // Paths to our Wikipedia page textures - expanded to 10 images
+            const leafPaths = [
+                '/static/images/leaf_data_1.png',
+                '/static/images/leaf_data_2.png',
+                '/static/images/leaf_data_3.png',
+                '/static/images/leaf_data_4.png',
+                '/static/images/leaf_data_5.png',
+                '/static/images/leaf_data_6.png',
+                '/static/images/leaf_data_7.png',
+                '/static/images/leaf_data_8.png',
+            ];
+            
+            // Create and load each image
+            leafPaths.forEach(path => {
+                const img = new Image();
+                img.src = path;
+                img.onerror = () => {
+                    console.log(`Failed to load image: ${path}`);
+                };
+                leafImages.push(img);
+            });
+        }
+        
+        // Create data trees
+        function createDataTrees() {
+            // Create trees in a more balanced distribution to ensure visibility
+            const centerX = 0;
+            const centerY = 0;
+            const centerZ = 0;
+            
+            // Create trees of different sizes and positions
+            for (let i = 0; i < NUM_TREES; i++) {
+                // Calculate position with better distribution
+                // Use fixed angles to ensure even spread around the scene
+                const angle = (i / NUM_TREES) * Math.PI * 2;
+                
+                // Organize trees in tiers for better visibility
+                let distance, y;
+                const tier = i % 3;
+                
+                if (tier === 0) {
+                    // Close trees in foreground (bottom of screen)
+                    distance = 400 + Math.random() * 150;
+                    y = centerY + 150 + Math.random() * 100; // Lower on screen (closer)
+                } else if (tier === 1) {
+                    // Mid-range trees
+                    distance = 600 + Math.random() * 150;
+                    y = centerY - 50 + Math.random() * 100; // Mid-level on screen
+                } else {
+                    // Distant trees in background (top of screen)
+                    distance = 800 + Math.random() * 150;
+                    y = centerY - 250 - Math.random() * 100; // Higher on screen (further)
+                }
+                
+                // Position with controlled x and z coordinates
+                const x = centerX + Math.cos(angle) * distance;
+                const z = centerZ + Math.sin(angle) * distance;
+                
+                // Size based on distance - foreground trees larger
+                const sizeFactor = tier === 0 ? 1.2 : (tier === 1 ? 1.0 : 0.8);
+                const height = (250 + Math.random() * 200) * sizeFactor;
+                const width = height * (0.18 + Math.random() * 0.08);
+                
+                // Create tree with more varied colors
+                dataTrees.push({
+                    id: i,
+                    x, y, z,
+                    height,
+                    width,
+                    color: {
+                        r: 40 + Math.random() * 40,
+                        g: 80 + Math.random() * 70,
+                        b: 150 + Math.random() * 60,
+                        a: 0.4 + Math.random() * 0.3
+                    },
+                    // Animation parameters
+                    rotation: Math.random() * Math.PI * 2,
+                    rotationSpeed: (Math.random() - 0.5) * 0.1,
+                    pulsePhase: Math.random() * Math.PI * 2,
+                    hoverOffset: 0, // For hover animation
+                    // Tree characteristics
+                    branches: [],
+                    leaves: [],
+                    // Ghost effect 
+                    ghostLayers: 2 + Math.floor(Math.random() * 3),
+                    ghostAlpha: 0.2 + Math.random() * 0.3,
+                    // Digital "spirits" trapped in the tree
+                    spirits: [],
+                    spiritCount: Math.floor(Math.random() * 5) + 3,
+                    // Interaction state
+                    isSelected: false,
+                    selectionIntensity: 0,
+                    // Light effects
+                    glowIntensity: 0.5 + Math.random() * 0.5,
+                    glowColor: {
+                        r: 150 + Math.random() * 50,
+                        g: 200 + Math.random() * 55,
+                        b: 255,
+                    }
+                });
+                
+                // Generate branches
+                generateBranches(dataTrees[i]);
+                
+                // Generate leaves
+                generateLeaves(dataTrees[i]);
+                
+                // Generate spirits trapped in the tree
+                generateSpirits(dataTrees[i]);
+            }
+            
+            // Create connections between nearby trees
+            createConnections();
+        }
+        
+        // Generate branches for a data tree
+        function generateBranches(tree) {
+            // Increase number of branches to support more leaf clusters
+            const numBranches = Math.floor(Math.random() * 4) + 7; // 7-10 branches
+            
+            for (let i = 0; i < numBranches; i++) {
+                // Distribute branches more evenly around the tree
+                const angleSegment = (Math.PI * 2) / numBranches;
+                const baseAngle = i * angleSegment; 
+                // Add some randomness to the angle within the segment
+                const angle = baseAngle + (Math.random() - 0.5) * angleSegment * 0.5;
+                
+                // Branch start point somewhere along the tree height - more distributed
+                // Favor upper half of the tree for better visibility
+                const heightPercent = (i % 3 === 0) ? 
+                    0.3 + Math.random() * 0.3 :     // Lower branches (30-60%)
+                    0.6 + Math.random() * 0.25;     // Upper branches (60-85%)
+                
+                const startHeight = tree.height * heightPercent;
+                
+                // Make branches longer on average for more leaf space
+                const length = tree.width * (0.7 + Math.random() * 0.8);
+                const thickness = 4 + Math.random() * 10;
+                
+                tree.branches.push({
+                    startHeight,
+                    angle,
+                    length,
+                    thickness,
+                    // Animation
+                    swayPhase: Math.random() * Math.PI * 2,
+                    swaySpeed: 0.2 + Math.random() * 0.3,
+                    swayAmount: 0.8 + Math.random() * 2,
+                    // Visual effect
+                    branchSegments: Math.floor(3 + Math.random() * 3)
+                });
+            }
+            
+            // Add a few smaller sub-branches to main branches for more attachment points
+            const mainBranchCount = tree.branches.length;
+            for (let i = 0; i < mainBranchCount; i++) {
+                // Only add sub-branches to longer main branches
+                if (tree.branches[i].length > tree.width * 0.7 && Math.random() > 0.3) {
+                    const mainBranch = tree.branches[i];
+                    
+                    // Create 1-2 sub-branches
+                    const subBranchCount = Math.floor(Math.random() * 2) + 1;
+                    
+                    for (let j = 0; j < subBranchCount; j++) {
+                        // Create sub-branch at 40-70% along main branch
+                        const distanceAlongBranch = 0.4 + Math.random() * 0.3;
+                        
+                        // Calculate sub-branch start position
+                        const branchY = tree.y - mainBranch.startHeight;
+                        const branchX = tree.x + Math.cos(mainBranch.angle) * mainBranch.length * distanceAlongBranch;
+                        const branchZ = tree.z + Math.sin(mainBranch.angle) * mainBranch.length * distanceAlongBranch;
+                        
+                        // Calculate height in tree coordinates
+                        const subBranchHeight = mainBranch.startHeight + 
+                                               Math.sin(mainBranch.angle) * mainBranch.length * distanceAlongBranch * 0.3;
+                        
+                        // Sub-branch angle relative to main branch (30-150 degrees)
+                        const angleOffset = (Math.random() * Math.PI * 0.67) + Math.PI/6; // 30-150 degrees
+                        const subAngle = mainBranch.angle + (Math.random() > 0.5 ? angleOffset : -angleOffset);
+                        
+                        // Sub-branches are smaller
+                        const subLength = mainBranch.length * (0.3 + Math.random() * 0.3);
+                        const subThickness = mainBranch.thickness * 0.6;
+                        
+                        tree.branches.push({
+                            startHeight: subBranchHeight,
+                            angle: subAngle,
+                            length: subLength,
+                            thickness: subThickness,
+                            // Animation
+                            swayPhase: Math.random() * Math.PI * 2,
+                            swaySpeed: 0.3 + Math.random() * 0.4,
+                            swayAmount: 1 + Math.random() * 2.5,
+                            // Visual effect
+                            branchSegments: Math.floor(2 + Math.random() * 2),
+                            // Flag as sub-branch for future reference
+                            isSubBranch: true
+                        });
+                    }
+                }
+            }
+        }
+        
+        // Generate leaves for a data tree
+        function generateLeaves(tree) {
+            // Create fewer leaves per tree but ensure they're better distributed
+            const numLeafClusters = Math.floor(Math.random() * 5) + 4;
+            
+            // Make sure tree has branches before proceeding
+            if (tree.branches.length === 0) {
+                return; // Skip trees without branches
+            }
+            
+            for (let i = 0; i < numLeafClusters; i++) {
+                // Force placement on branches (avoid trunk placement completely)
+                const onBranch = true;
+                let position, angle;
+                
+                // Select branch - prefer outer branches for better visibility
+                const branchIndices = [...Array(tree.branches.length).keys()];
+                // Sort branches by length (prefer longer branches)
+                branchIndices.sort((a, b) => tree.branches[b].length - tree.branches[a].length);
+                
+                // Choose from the first 70% of branches (the longer ones)
+                const branchIndexPosition = Math.floor(Math.random() * Math.max(1, Math.floor(branchIndices.length * 0.7)));
+                const branchIndex = branchIndices[branchIndexPosition];
+                const branch = tree.branches[branchIndex];
+                
+                // Place more naturally along branches - strongly favor tips (outer positions)
+                const distanceAlongBranch = Math.pow(Math.random(), 0.5) * 0.5 + 0.5; // 50-100% along branch (outer half)
+                
+                position = {
+                    h: branch.startHeight,
+                    r: branch.length * distanceAlongBranch,
+                    branchAngle: branch.angle
+                };
+                
+                // Vary the angles more for a more natural, spread-out look
+                // Leaves should look like they're growing outward and not just along the branch
+                angle = branch.angle + (Math.random() - 0.5) * Math.PI * 1.2;
+                
+                // Pick a random leaf image from the expanded collection
+                const imageIndex = Math.floor(Math.random() * leafImages.length);
+                
+                // Create leaf with improved positioning properties
+                tree.leaves.push({
+                    position,
+                    angle,
+                    size: 40 + Math.random() * 60, // Slightly larger for better visibility
+                    imageIndex,
+                    // Animation parameters
+                    rotationSpeed: (Math.random() - 0.5) * 0.2,
+                    currentRotation: Math.random() * Math.PI * 2,
+                    pulsePhase: Math.random() * Math.PI * 2,
+                    // Visual effects
+                    opacity: 0.75 + Math.random() * 0.25,
+                    // Hover animation
+                    hoverAmplitude: 5 + Math.random() * 10,
+                    hoverFrequency: 0.3 + Math.random() * 0.7,
+                    // Simplified tint
+                    tint: {
+                        r: 180 + Math.random() * 75,
+                        g: 180 + Math.random() * 75,
+                        b: 230 + Math.random() * 25,
+                        strength: 0.15 + Math.random() * 0.25
+                    },
+                    // Distance from branch - make them stick out more
+                    offset: 10 + Math.random() * 20
+                });
+            }
+        }
+        
+        // Generate digital spirits trapped in tree
+        function generateSpirits(tree) {
+            for (let i = 0; i < tree.spiritCount; i++) {
+                // Position within the tree trunk
+                const height = Math.random() * tree.height * 0.7 + tree.height * 0.15;
+                const radius = Math.random() * tree.width * 0.4;
+                const angle = Math.random() * Math.PI * 2;
+                
+                // Spirit characteristics
+                tree.spirits.push({
+                    height,
+                    radius,
+                    angle,
+                    size: 10 + Math.random() * 30,
+                    color: {
+                        r: 200 + Math.random() * 55,
+                        g: 200 + Math.random() * 55,
+                        b: 255,
+                        a: 0.4 + Math.random() * 0.6
+                    },
+                    // Animation
+                    pulsePhase: Math.random() * Math.PI * 2,
+                    pulseSpeed: 1 + Math.random() * 2,
+                    orbitSpeed: (Math.random() - 0.5) * 0.3,
+                    orbitRadius: radius,
+                    // Glow effect
+                    glowSize: 1.5 + Math.random() * 2,
+                    // Flow pattern - data bits flowing through spirit
+                    flowParticles: [],
+                    particleCount: Math.floor(Math.random() * 10) + 5
+                });
+                
+                // Create flow particles for this spirit
+                const spirit = tree.spirits[i];
+                for (let j = 0; j < spirit.particleCount; j++) {
+                    spirit.flowParticles.push({
+                        offset: Math.random() * 2 * Math.PI,
+                        speed: 0.5 + Math.random() * 1.5,
+                        size: 1 + Math.random() * 3,
+                        distance: Math.random() * spirit.size * 0.8,
+                        opacity: 0.5 + Math.random() * 0.5
+                    });
+                }
+            }
+        }
+        
+        // Create connections between trees
+        function createConnections() {
+            // Clear any existing connections
+            connections.length = 0;
+            
+            // Create more deliberate connections between trees
+            // Connect trees that are in adjacent tiers for better visual flow
+            for (let i = 0; i < dataTrees.length; i++) {
+                const tree = dataTrees[i];
+                // Calculate which tier this tree is in
+                const treeTier = i % 3;
+                
+                // Determine number of connections based on tier
+                const connectionsCount = treeTier === 0 ? 2 : (treeTier === 1 ? 3 : 1);
+                
+                // Connect to trees in different tiers for better composition
+                const potentialConnections = [];
+                
+                for (let j = 0; j < dataTrees.length; j++) {
+                    if (i === j) continue;
+                    
+                    const otherTree = dataTrees[j];
+                    const otherTier = j % 3;
+                    
+                    // Prioritize connections between different tiers
+                    let connectionPriority = 0;
+                    if (treeTier !== otherTier) {
+                        // Prefer connecting across adjacent tiers (0->1 or 1->2)
+                        connectionPriority = Math.abs(treeTier - otherTier) === 1 ? 3 : 1;
+                    } else {
+                        // Lower priority for same-tier connections
+                        connectionPriority = 0.5;
+                    }
+                    
+                    // Calculate distance for sorting
+                    const dx = tree.x - otherTree.x;
+                    const dy = tree.y - otherTree.y;
+                    const dz = tree.z - otherTree.z;
+                    const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                    
+                    potentialConnections.push({ 
+                        index: j, 
+                        distance,
+                        priority: connectionPriority
+                    });
+                }
+                
+                // Sort by priority first, then by distance
+                potentialConnections.sort((a, b) => {
+                    if (a.priority !== b.priority) {
+                        return b.priority - a.priority; // Higher priority first
+                    }
+                    return a.distance - b.distance; // Then by distance
+                });
+                
+                // Connect to best candidates
+                let connectionsAdded = 0;
+                for (let k = 0; k < potentialConnections.length && connectionsAdded < connectionsCount; k++) {
+                    const targetIndex = potentialConnections[k].index;
+                    
+                    // Check if connection already exists
+                    const connectionExists = connections.some(conn => 
+                        (conn.from === i && conn.to === targetIndex) || 
+                        (conn.from === targetIndex && conn.to === i)
+                    );
+                    
+                    if (!connectionExists) {
+                        // Calculate curve height based on trees' tier difference to keep paths within frame
+                        const targetTier = targetIndex % 3;
+                        let curveHeight = 50 + Math.random() * 50; // Base curve
+                        
+                        // Adjust curve direction based on tiers
+                        if (treeTier < targetTier) {
+                            // Connection going upward (to more distant tier) - curve upward
+                            curveHeight *= -1; // Negative makes curve go up
+                        } else if (treeTier > targetTier) {
+                            // Connection going downward - positive curve value
+                        } else {
+                            // Same tier - smaller random curve
+                            curveHeight = (Math.random() > 0.5 ? 1 : -1) * (20 + Math.random() * 30);
+                        }
+                        
+                        connections.push({
+                            from: i,
+                            to: targetIndex,
+                            // Visual properties
+                            width: 1.5 + Math.random() * 1.5, // Thinner connections
+                            color: {
+                                r: 120 + Math.random() * 50,
+                                g: 180 + Math.random() * 75,
+                                b: 220 + Math.random() * 35,
+                                a: 0.3 + Math.random() * 0.2 // Slightly more transparent
+                            },
+                            // Animation
+                            pulsePhase: Math.random() * Math.PI * 2,
+                            pulseSpeed: 0.3 + Math.random() * 0.5, // Slower pulse for better performance
+                            // Data packets flowing along the connection
+                            dataPackets: [],
+                            // How active this connection is
+                            activity: 0.15 + Math.random() * 0.15, // Less activity by default
+                            // Curve control points
+                            curveHeight: curveHeight,
+                            curvePhase: Math.random() * Math.PI * 2
+                        });
+                        
+                        // Create initial data packets - fewer for better performance
+                        initializeDataPackets(connections[connections.length - 1]);
+                        connectionsAdded++;
+                    }
+                }
+            }
+        }
+        
+        // Create data packets for a connection
+        function initializeDataPackets(connection) {
+            // Fewer packets for performance
+            const packetCount = Math.floor(connection.activity * 5) + 1;
+            
+            for (let i = 0; i < packetCount; i++) {
+                connection.dataPackets.push({
+                    position: Math.random(), // 0 to 1 along the path
+                    speed: 0.08 + Math.random() * 0.12, // Slower for better performance
+                    size: 2 + Math.random() * 3, // Slightly smaller
+                    // Direction (0 = from->to, 1 = to->from)
+                    direction: Math.random() > 0.5 ? 0 : 1,
+                    color: {
+                        r: connection.color.r + Math.random() * 55,
+                        g: connection.color.g + Math.random() * 55,
+                        b: connection.color.b + Math.random() * 35,
+                        a: 0.5 + Math.random() * 0.3
+                    }
+                });
+            }
+        }
+        
+        // Listen for landmarks data
+        socket.on('landmarks', function(data) {
+            handLandmarks = JSON.parse(data);
+            
+            if (handLandmarks && handLandmarks.length > 0) {
+                // Get index finger position (usually index 8)
+                const indexTip = handLandmarks[8] || handLandmarks[0];
+                handPosition = {
+                    x: indexTip.x * canvas.width,
+                    y: indexTip.y * canvas.height
+                };
+                
+                // Use hand position to control camera offset (parallax effect)
+                targetCameraOffset = {
+                    x: (handPosition.x - canvas.width / 2) * 0.05,
+                    y: (handPosition.y - canvas.height / 2) * 0.05
+                };
+            }
+        });
+        
+        // Listen for gesture data
+        socket.on('gesture', function(data) {
+            lastGesture = currentGesture;
+            currentGesture = data;
+            
+            // Handle "Click" gesture to interact with trees and spirits
+            if (currentGesture === 'Click' && lastGesture !== 'Click' && handPosition) {
+                handleClick();
+            }
+            
+            // Handle "Hold" gesture to control camera movement
+            if (currentGesture === 'Hold' && handPosition) {
+                // Adjust camera Z based on hand position Y
+                const targetZ = 1500 + (handPosition.y / canvas.height) * 1000;
+                cameraZ += (targetZ - cameraZ) * 0.05;
+            }
+        });
+        
+        // Handle click interaction with trees and spirits
+        function handleClick() {
+            if (!handPosition) return;
+            
+            // Convert screen position to world space for hit testing
+            // This is an approximate conversion
+            const worldX = (handPosition.x - canvas.width/2 - cameraOffset.x) * (cameraZ / 1000);
+            const worldY = (handPosition.y - canvas.height/2 - cameraOffset.y) * (cameraZ / 1000);
+            
+            // Find closest tree/spirit to interact with
+            let closestTree = null;
+            let closestDistance = Infinity;
+            
+            // Check each tree
+            dataTrees.forEach(tree => {
+                // Project tree position to screen
+                const treeProj = project3D(tree.x, tree.y, tree.z);
+                
+                // Calculate 2D distance on screen
+                const dx = treeProj.x - handPosition.x;
+                const dy = treeProj.y - handPosition.y;
+                const distance = Math.sqrt(dx*dx + dy*dy);
+                
+                // Scale hit area based on tree's projected size
+                const hitRadius = tree.width * treeProj.factor * 1.5;
+                
+                // Check if this is the closest tree within hit range
+                if (distance < hitRadius && distance < closestDistance) {
+                    closestTree = tree;
+                    closestDistance = distance;
+                }
+            });
+            
+            // If we found a tree to interact with
+            if (closestTree) {
+                interactWithTree(closestTree);
+            }
+        }
+        
+        // Handle interaction with a specific tree
+        function interactWithTree(tree) {
+            // Toggle selection state
+            tree.isSelected = !tree.isSelected;
+            
+            // Increase glow intensity when selected
+            if (tree.isSelected) {
+                tree.glowIntensity = 2.0;
+                
+                // Release spirits - animate them floating out more actively
+                tree.spirits.forEach(spirit => {
+                    spirit.orbitSpeed *= 3;
+                    spirit.pulseSpeed *= 2;
+                    
+                    // Make flow particles more active
+                    spirit.flowParticles.forEach(particle => {
+                        particle.speed *= 2;
+                        particle.distance *= 1.5;
+                    });
+                });
+                
+                // Animate leaves - make them "flutter"
+                tree.leaves.forEach(leaf => {
+                    leaf.rotationSpeed *= 3;
+                    leaf.hoverAmplitude *= 2;
+                    leaf.hoverFrequency *= 1.5;
+                });
+                
+                // Create some particle effects for feedback
+                for (let i = 0; i < 20; i++) {
+                    createReleaseParticle(tree);
+                }
+            } else {
+                // Reset to normal state
+                tree.glowIntensity = 0.5 + Math.random() * 0.5;
+                
+                // Calm spirits down
+                tree.spirits.forEach(spirit => {
+                    spirit.orbitSpeed /= 3;
+                    spirit.pulseSpeed /= 2;
+                    
+                    // Reset flow particles
+                    spirit.flowParticles.forEach(particle => {
+                        particle.speed /= 2;
+                        particle.distance /= 1.5;
+                    });
+                });
+                
+                // Reset leaf animation
+                tree.leaves.forEach(leaf => {
+                    leaf.rotationSpeed /= 3;
+                    leaf.hoverAmplitude /= 2;
+                    leaf.hoverFrequency /= 1.5;
+                });
+            }
+            
+            // Activate connections from this tree
+            connections.forEach(conn => {
+                if (conn.from === tree.id || conn.to === tree.id) {
+                    // Increase connection activity
+                    conn.activity = tree.isSelected ? 0.9 : 0.3;
+                    
+                    // Add more data packets when activated
+                    if (tree.isSelected) {
+                        const newPackets = Math.floor(Math.random() * 5) + 3;
+                        for (let i = 0; i < newPackets; i++) {
+                            conn.dataPackets.push({
+                                position: Math.random(),
+                                speed: 0.3 + Math.random() * 0.5,
+                                size: 3 + Math.random() * 4,
+                                direction: Math.random() > 0.5 ? 0 : 1,
+                                color: {
+                                    r: conn.color.r + Math.random() * 55,
+                                    g: conn.color.g + Math.random() * 55,
+                                    b: conn.color.b + Math.random() * 35,
+                                    a: 0.7 + Math.random() * 0.3
+                                }
+                            });
+                        }
+                    } else {
+                        // Reduce data packets when deactivated
+                        conn.dataPackets = conn.dataPackets.slice(0, Math.max(1, Math.floor(conn.dataPackets.length / 2)));
+                    }
+                }
+            });
+        }
+        
+        // Spirit release particles system
+        const releaseParticles = [];
+        
+        // Create particles when a spirit is released/activated
+        function createReleaseParticle(tree) {
+            // Random position within the tree
+            const height = Math.random() * tree.height;
+            const angle = Math.random() * Math.PI * 2;
+            const radius = Math.random() * tree.width * 0.5;
+            
+            const x = tree.x + Math.cos(angle) * radius;
+            const y = tree.y - height;
+            const z = tree.z + Math.sin(angle) * radius;
+            
+            // Random direction outward from tree center
+            const dirX = Math.cos(angle);
+            const dirY = -0.5 - Math.random() * 0.5; // Mostly upward
+            const dirZ = Math.sin(angle);
+            
+            releaseParticles.push({
+                x, y, z,
+                dirX, dirY, dirZ,
+                speed: 20 + Math.random() * 80,
+                size: 3 + Math.random() * 7,
+                color: {
+                    r: 200 + Math.random() * 55,
+                    g: 200 + Math.random() * 55,
+                    b: 255,
+                    a: 0.6 + Math.random() * 0.4
+                },
+                life: 1 + Math.random() * 2, // seconds
+                gravity: 5 + Math.random() * 10
+            });
+        }
+        
+        // Update and draw release particles
+        function updateReleaseParticles() {
+            for (let i = releaseParticles.length - 1; i >= 0; i--) {
+                const particle = releaseParticles[i];
+                
+                // Update position
+                particle.x += particle.dirX * particle.speed * deltaTime;
+                particle.y += particle.dirY * particle.speed * deltaTime;
+                particle.z += particle.dirZ * particle.speed * deltaTime;
+                
+                // Apply gravity
+                particle.dirY += particle.gravity * deltaTime;
+                
+                // Update life
+                particle.life -= deltaTime;
+                
+                // Remove if expired
+                if (particle.life <= 0) {
+                    releaseParticles.splice(i, 1);
+                    continue;
+                }
+                
+                // Draw particle
+                const proj = project3D(particle.x, particle.y, particle.z);
+                const size = particle.size * proj.factor;
+                
+                // Fade out as life decreases
+                const alpha = particle.color.a * (particle.life / 3);
+                
+                ctx.beginPath();
+                ctx.arc(proj.x, proj.y, size, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${particle.color.r}, ${particle.color.g}, ${particle.color.b}, ${alpha})`;
+                ctx.fill();
+                
+                // Add glow
+                ctx.beginPath();
+                ctx.arc(proj.x, proj.y, size * 2, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${particle.color.r}, ${particle.color.g}, ${particle.color.b}, ${alpha * 0.3})`;
+                ctx.fill();
+            }
+        }
+        
+        // Main animation loop
+        function animate(currentTime) {
+            requestAnimationFrame(animate);
+            
+            // Calculate delta time for smooth animations
+            if (!lastFrameTime) lastFrameTime = currentTime;
+            deltaTime = (currentTime - lastFrameTime) / 1000; // in seconds
+            lastFrameTime = currentTime;
+            
+            // Cap deltaTime to prevent jumps after tab switch
+            if (deltaTime > 0.1) deltaTime = 0.1;
+            
+            // Update time for animations
+            time += deltaTime;
+            
+            // Smooth camera movement
+            cameraOffset.x += (targetCameraOffset.x - cameraOffset.x) * 0.05;
+            cameraOffset.y += (targetCameraOffset.y - cameraOffset.y) * 0.05;
+            
+            // Clear the canvas
+            ctx.fillStyle = 'rgba(0, 0, 0, 1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw starry background with parallax effect
+            drawBackground();
+            updateShootingStars();
+            
+            // Sort trees by z-position for proper rendering order
+            const sortedTrees = [...dataTrees].sort((a, b) => (b.z - a.z));
+            
+            // Draw connections between trees (drawn first so they're behind trees)
+            drawConnections();
+            
+            // Draw data trees
+            sortedTrees.forEach(tree => {
+                drawTree(tree);
+            });
+            
+            // Update and draw release particles
+            updateReleaseParticles();
+            
+            // Draw hand landmarks if available (for debugging/feedback)
+            if (handLandmarks && handLandmarks.length > 0) {
+                drawHandLandmarks();
+            }
+        }
+        
+        // Draw starry background with parallax effect
+        function drawBackground() {
+            // Clear with gradient
+            const gradient = ctx.createRadialGradient(
+                canvas.width / 2, canvas.height / 2, 0,
+                canvas.width / 2, canvas.height / 2, canvas.height
+            );
+            gradient.addColorStop(0, 'rgba(10, 20, 40, 1)');
+            gradient.addColorStop(1, 'rgba(0, 0, 10, 1)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw stars with 3D parallax effect
+            for (let i = 0; i < stars.length; i++) {
+                const star = stars[i];
+                
+                // Project star position with camera offset
+                const projection = project3D(star.x, star.y, star.z);
+                
+                // Only draw stars in view
+                if (projection.x > -50 && projection.x < canvas.width + 50 &&
+                    projection.y > -50 && projection.y < canvas.height + 50) {
+                    
+                    // Size based on distance
+                    const size = star.radius * projection.factor * 2;
+                    
+                    // Twinkle effect
+                    const twinkle = Math.sin(time * 3 + i * 0.3) * 0.15 + 0.85;
+                    const alpha = star.color.a * twinkle;
+                    
+                    // Draw star with glow
+                    ctx.beginPath();
+                    ctx.arc(projection.x, projection.y, size, 0, Math.PI * 2);
+                    const color = star.color;
+                    ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
+                    ctx.fill();
+                    
+                    // Add glow for brighter stars
+                    if (size > 1) {
+                        ctx.beginPath();
+                        ctx.arc(projection.x, projection.y, size * 2, 0, Math.PI * 2);
+                        ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha * 0.2})`;
+                        ctx.fill();
+                    }
+                }
+            }
+            
+            // Draw constellation patterns
+            drawConstellations();
+            
+            // Occasional shooting star
+            if (Math.random() < 0.005) {
+                createShootingStar();
+            }
+        }
+        
+        // Draw constellation patterns similar to hand tracking visuals
+        function drawConstellations() {
+            // Colors for nodes
+            const nodeColors = {
+                blue: {
+                    fill: 'rgba(100, 180, 255, 0.7)',
+                    glow: 'rgba(60, 150, 255, 0.3)'
+                },
+                gold: {
+                    fill: 'rgba(255, 215, 0, 0.7)',
+                    glow: 'rgba(255, 190, 0, 0.3)'
+                }
+            };
+            
+            // Draw each constellation
+            constellations.forEach(constellation => {
+                const stars = constellation.stars;
+                const connections = constellation.connections;
+                
+                // Calculate pulse effect for connection opacity
+                const connectionPulse = Math.sin(time * constellation.pulseSpeed + constellation.pulsePhase) * 0.2 + 0.8;
+                
+                // Draw connections first
+                ctx.lineWidth = 1;
+                ctx.lineCap = 'round';
+                
+                // Draw connections between stars
+                for (const [i, j] of connections) {
+                    if (i >= stars.length || j >= stars.length) continue;
+                    
+                    // Project star positions
+                    const starA = stars[i];
+                    const starB = stars[j];
+                    const projA = project3D(starA.x, starA.y, starA.z);
+                    const projB = project3D(starB.x, starB.y, starB.z);
+                    
+                    // Skip if either star is behind camera
+                    if (starA.z + cameraZ <= 0 || starB.z + cameraZ <= 0) continue;
+                    
+                    // Create gradient line
+                    const gradient = ctx.createLinearGradient(projA.x, projA.y, projB.x, projB.y);
+                    gradient.addColorStop(0, 'rgba(100, 180, 255, ' + (0.2 * connectionPulse) + ')');
+                    gradient.addColorStop(1, 'rgba(255, 215, 0, ' + (0.2 * connectionPulse) + ')');
+                    
+                    // Draw line
+                    ctx.beginPath();
+                    ctx.moveTo(projA.x, projA.y);
+                    ctx.lineTo(projB.x, projB.y);
+                    ctx.strokeStyle = gradient;
+                    ctx.stroke();
+                }
+                
+                // Draw stars after connections
+                stars.forEach(star => {
+                    // Project position
+                    const proj = project3D(star.x, star.y, star.z);
+                    
+                    // Skip if behind camera
+                    if (star.z + cameraZ <= 0) return;
+                    
+                    // Calculate size based on distance
+                    const size = star.size * proj.factor;
+                    
+                    // Pulse effect for individual star
+                    const pulse = Math.sin(time * star.pulseSpeed + star.pulsePhase) * 0.2 + 0.8;
+                    
+                    // Draw using same styling as hand landmark constellation
+                    const colors = star.isGold ? nodeColors.gold : nodeColors.blue;
+                    
+                    // Draw glow
+                    ctx.beginPath();
+                    ctx.arc(proj.x, proj.y, size * 2, 0, Math.PI * 2);
+                    ctx.fillStyle = colors.glow;
+                    ctx.fill();
+                    
+                    // Draw main node
+                    ctx.beginPath();
+                    ctx.arc(proj.x, proj.y, size, 0, Math.PI * 2);
+                    ctx.fillStyle = colors.fill;
+                    ctx.fill();
+                    
+                    // Add white center for sparkle
+                    ctx.beginPath();
+                    ctx.arc(proj.x, proj.y, size * 0.4, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(255, 255, 255, ' + (0.8 * pulse) + ')';
+                    ctx.fill();
+                });
+            });
+        }
+        
+        // Create a shooting star effect
+        const shootingStars = [];
+        function createShootingStar() {
+            const side = Math.floor(Math.random() * 4); // 0=top, 1=right, 2=bottom, 3=left
+            let x, y;
+            
+            switch(side) {
+                case 0: // top
+                    x = Math.random() * canvas.width;
+                    y = -20;
+                    break;
+                case 1: // right
+                    x = canvas.width + 20;
+                    y = Math.random() * canvas.height;
+                    break;
+                case 2: // bottom
+                    x = Math.random() * canvas.width;
+                    y = canvas.height + 20;
+                    break;
+                case 3: // left
+                    x = -20;
+                    y = Math.random() * canvas.height;
+                    break;
+            }
+            
+            // Random direction but generally toward center
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const angleToCenter = Math.atan2(centerY - y, centerX - x);
+            const angleVariation = (Math.random() - 0.5) * Math.PI / 2; // ±45 degrees
+            const angle = angleToCenter + angleVariation;
+            
+            shootingStars.push({
+                x: x,
+                y: y,
+                speed: 300 + Math.random() * 400,
+                angle: angle,
+                length: 50 + Math.random() * 100,
+                width: 1 + Math.random() * 2,
+                ttl: 2, // seconds to live
+                alpha: 0.7 + Math.random() * 0.3,
+                color: {
+                    r: 200 + Math.random() * 55,
+                    g: 200 + Math.random() * 55,
+                    b: 255
+                }
+            });
+        }
+        
+        // Update and draw shooting stars
+        function updateShootingStars() {
+            for (let i = shootingStars.length - 1; i >= 0; i--) {
+                const star = shootingStars[i];
+                
+                // Update position
+                star.x += Math.cos(star.angle) * star.speed * deltaTime;
+                star.y += Math.sin(star.angle) * star.speed * deltaTime;
+                
+                // Update TTL
+                star.ttl -= deltaTime;
+                
+                // Remove if out of bounds or expired
+                if (star.ttl <= 0 || 
+                    star.x < -100 || star.x > canvas.width + 100 ||
+                    star.y < -100 || star.y > canvas.height + 100) {
+                    shootingStars.splice(i, 1);
+                    continue;
+                }
+                
+                // Calculate trail points
+                const trailX = star.x - Math.cos(star.angle) * star.length;
+                const trailY = star.y - Math.sin(star.angle) * star.length;
+                
+                // Draw shooting star
+                ctx.beginPath();
+                ctx.moveTo(star.x, star.y);
+                ctx.lineTo(trailX, trailY);
+                
+                // Create gradient for trail
+                const gradient = ctx.createLinearGradient(star.x, star.y, trailX, trailY);
+                const color = star.color;
+                gradient.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, ${star.alpha})`);
+                gradient.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
+                
+                ctx.strokeStyle = gradient;
+                ctx.lineWidth = star.width;
+                ctx.stroke();
+                
+                // Add a small glow at the head
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.width + 1, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${star.alpha})`;
+                ctx.fill();
+            }
+        }
+        
+        // Draw all connections between trees
+        function drawConnections() {
+            connections.forEach(conn => {
+                const fromTree = dataTrees[conn.from];
+                const toTree = dataTrees[conn.to];
+                
+                // Project the tree base points
+                const fromProj = project3D(fromTree.x, fromTree.y, fromTree.z);
+                const toProj = project3D(toTree.x, toTree.y, toTree.z);
+                
+                // Don't draw if either end is behind the camera
+                if (fromTree.z + cameraZ <= 0 || toTree.z + cameraZ <= 0) return;
+                
+                // Calculate multiple control points for more interesting curves
+                // Main control point
+                const midX = (fromTree.x + toTree.x) / 2;
+                const midY = (fromTree.y + toTree.y) / 2 - conn.curveHeight;
+                const midZ = (fromTree.z + toTree.z) / 2;
+                
+                // Second control point for more organic feel
+                const secondMidX = midX + Math.sin(time * 0.2 + conn.pulsePhase) * 50;
+                const secondMidY = midY + Math.cos(time * 0.3 + conn.pulsePhase) * 30;
+                const secondMidZ = midZ + Math.sin(time * 0.25 + conn.pulsePhase) * 50;
+                
+                // Project the control points
+                const controlProj = project3D(midX, midY, midZ);
+                const control2Proj = project3D(secondMidX, secondMidY, secondMidZ);
+                
+                // Pulse effect for connection
+                const pulse = Math.sin(time * conn.pulseSpeed + conn.pulsePhase) * 0.3 + 0.7;
+                
+                // Calculate opacity based on distance
+                const avgFactor = (fromProj.factor + toProj.factor) / 2;
+                const opacity = conn.color.a * pulse * Math.min(1, avgFactor * 1.5);
+                
+                // Draw main connection path as a smooth curve
+                ctx.beginPath();
+                ctx.moveTo(fromProj.x, fromProj.y);
+                // Use bezier curve for more organic feel
+                ctx.bezierCurveTo(
+                    controlProj.x, controlProj.y,
+                    control2Proj.x, control2Proj.y,
+                    toProj.x, toProj.y
+                );
+                
+                // Create a gradient along the path
+                const gradient = ctx.createLinearGradient(fromProj.x, fromProj.y, toProj.x, toProj.y);
+                gradient.addColorStop(0, `rgba(${conn.color.r}, ${conn.color.g + 20}, ${conn.color.b + 40}, ${opacity})`);
+                gradient.addColorStop(0.5, `rgba(${conn.color.r + 30}, ${conn.color.g + 50}, ${conn.color.b + 60}, ${opacity * 0.8})`);
+                gradient.addColorStop(1, `rgba(${conn.color.r + 10}, ${conn.color.g + 30}, ${conn.color.b + 50}, ${opacity})`);
+                
+                // Draw glowing path
+                ctx.strokeStyle = gradient;
+                ctx.lineWidth = conn.width * avgFactor * pulse;
+                ctx.lineCap = 'round';
+                ctx.stroke();
+                
+                // Add glow effect
+                ctx.shadowColor = `rgba(${conn.color.r + 50}, ${conn.color.g + 80}, ${conn.color.b + 100}, ${0.5 * pulse})`;
+                ctx.shadowBlur = conn.width * avgFactor * 3;
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+                
+                // Draw secondary ethereal paths (thinner, more transparent)
+                const numEtherealPaths = 2;
+                for (let i = 0; i < numEtherealPaths; i++) {
+                    // Create offset paths using sin/cos based on time
+                    const offsetFactor = i + 1;
+                    const waveAmplitude = 15 + Math.sin(time * 0.5) * 5;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(fromProj.x, fromProj.y);
+                    
+                    // Calculate control points with offset
+                    const offsetX1 = controlProj.x + Math.sin(time * 0.3 + i) * waveAmplitude * offsetFactor;
+                    const offsetY1 = controlProj.y + Math.cos(time * 0.4 + i) * waveAmplitude * offsetFactor;
+                    
+                    const offsetX2 = control2Proj.x + Math.cos(time * 0.3 + i + Math.PI) * waveAmplitude * offsetFactor;
+                    const offsetY2 = control2Proj.y + Math.sin(time * 0.4 + i + Math.PI) * waveAmplitude * offsetFactor;
+                    
+                    // Create ethereal path
+                    ctx.bezierCurveTo(
+                        offsetX1, offsetY1,
+                        offsetX2, offsetY2,
+                        toProj.x, toProj.y
+                    );
+                    
+                    // Create a semi-transparent gradient for ethereal effect
+                    const etherGradient = ctx.createLinearGradient(fromProj.x, fromProj.y, toProj.x, toProj.y);
+                    etherGradient.addColorStop(0, `rgba(${conn.color.r + 70}, ${conn.color.g + 100}, ${conn.color.b + 130}, ${opacity * 0.3})`);
+                    etherGradient.addColorStop(0.5, `rgba(${conn.color.r + 100}, ${conn.color.g + 130}, ${conn.color.b + 180}, ${opacity * 0.1})`);
+                    etherGradient.addColorStop(1, `rgba(${conn.color.r + 70}, ${conn.color.g + 100}, ${conn.color.b + 130}, ${opacity * 0.3})`);
+                    
+                    ctx.strokeStyle = etherGradient;
+                    ctx.lineWidth = (conn.width * avgFactor * 0.7) / (offsetFactor);
+                    ctx.stroke();
+                }
+                
+                // Draw data packets moving along the connection
+                drawDataPackets(conn, fromProj, controlProj, toProj, control2Proj);
+            });
+        }
+        
+        // Draw data packets moving along connections
+        function drawDataPackets(conn, fromProj, controlProj, toProj, control2Proj) {
+            // Update and draw each data packet
+            for (let i = 0; i < conn.dataPackets.length; i++) {
+                const packet = conn.dataPackets[i];
+                
+                // Move packet along the path
+                if (packet.direction === 0) {
+                    // Moving from->to
+                    packet.position += packet.speed * deltaTime;
+                    if (packet.position > 1) {
+                        packet.position = 0;
+                        // Occasionally reverse direction
+                        if (Math.random() < 0.2) packet.direction = 1;
+                    }
+                } else {
+                    // Moving to->from
+                    packet.position -= packet.speed * deltaTime;
+                    if (packet.position < 0) {
+                        packet.position = 1;
+                        // Occasionally reverse direction
+                        if (Math.random() < 0.2) packet.direction = 0;
+                    }
+                }
+                
+                // Calculate point along the bezier curve
+                // For a cubic bezier curve, the formula is:
+                // P = (1-t)³*P0 + 3(1-t)²*t*P1 + 3(1-t)*t²*P2 + t³*P3
+                const t = packet.position;
+                const mt = 1 - t;
+                
+                // Cubic bezier calculation
+                const x = mt*mt*mt*fromProj.x + 
+                          3*mt*mt*t*controlProj.x + 
+                          3*mt*t*t*control2Proj.x + 
+                          t*t*t*toProj.x;
+                          
+                const y = mt*mt*mt*fromProj.y + 
+                          3*mt*mt*t*controlProj.y + 
+                          3*mt*t*t*control2Proj.y + 
+                          t*t*t*toProj.y;
+                
+                // Calculate average projection factor for this point
+                const avgFactor = fromProj.factor * (1 - t) + toProj.factor * t;
+                
+                // Pulse effect with slight variation per packet
+                const pulse = Math.sin(time * 3 + i * 0.5) * 0.15 + 0.85;
+                
+                // Draw packet with simplified glow effect
+                const size = packet.size * avgFactor * pulse;
+                
+                // Glowing core
+                ctx.beginPath();
+                ctx.arc(x, y, size, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${packet.color.r}, ${packet.color.g}, ${packet.color.b}, ${packet.color.a * pulse})`;
+                ctx.fill();
+                
+                // Simpler glow - just one layer
+                ctx.beginPath();
+                ctx.arc(x, y, size * 2, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${packet.color.r}, ${packet.color.g}, ${packet.color.b}, ${packet.color.a * 0.3 * pulse})`;
+                ctx.fill();
+                
+                // Skip additional layers and trail effects for better performance
+            }
+        }
+        
+        // Draw a single data tree
+        function drawTree(tree) {
+            // Don't draw if behind camera
+            if (tree.z + cameraZ <= 0) return;
+            
+            // Project base position
+            const baseProj = project3D(tree.x, tree.y, tree.z);
+            const topY = tree.y - tree.height; // y increases downward in canvas
+            const topProj = project3D(tree.x, topY, tree.z);
+            
+            // Calculate tree width at this distance
+            const scaledWidth = tree.width * baseProj.factor;
+            
+            // Calculate hover animation offset
+            tree.hoverOffset = Math.sin(time * 0.5 + tree.pulsePhase) * 5;
+            
+            // Draw translucent trunk
+            drawTrunk(tree, baseProj, topProj, scaledWidth);
+            
+            // Draw branches
+            tree.branches.forEach(branch => {
+                drawBranch(tree, branch, baseProj.factor);
+            });
+            
+            // Draw spirits trapped inside the tree
+            tree.spirits.forEach(spirit => {
+                drawSpirit(tree, spirit, baseProj.factor);
+            });
+            
+            // Sort leaves by z-distance for proper depth rendering
+            const sortedLeaves = [...tree.leaves].sort((a, b) => {
+                // Calculate 3D positions
+                const aPos = getLeafPosition(tree, a);
+                const bPos = getLeafPosition(tree, b);
+                // Sort back to front (further objects drawn first)
+                return bPos.z - aPos.z;
+            });
+            
+            // Draw leaves last (on top)
+            sortedLeaves.forEach(leaf => {
+                drawLeaf(tree, leaf, baseProj.factor);
+            });
+        }
+        
+        // Helper function to get 3D position of a leaf
+        function getLeafPosition(tree, leaf) {
+            const branchY = tree.y - leaf.position.h;
+            const perpAngle = leaf.position.branchAngle + Math.PI/2;
+            const offsetDistance = leaf.offset || 0;
+            
+            // Base position along branch
+            const baseX = tree.x + Math.cos(leaf.position.branchAngle) * leaf.position.r;
+            const baseY = branchY + Math.sin(leaf.position.branchAngle) * leaf.position.r * 0.3;
+            const baseZ = tree.z + Math.sin(leaf.position.branchAngle) * leaf.position.r;
+            
+            // Apply perpendicular offset
+            const x = baseX + Math.cos(perpAngle) * offsetDistance;
+            const y = baseY + Math.sin(perpAngle) * offsetDistance * 0.3;
+            const z = baseZ + Math.sin(perpAngle) * offsetDistance;
+            
+            return { x, y, z };
+        }
+        
+        // Draw the main trunk of a data tree
+        function drawTrunk(tree, baseProj, topProj, scaledWidth) {
+            // Basic shape
+            ctx.beginPath();
+            ctx.moveTo(baseProj.x - scaledWidth/2, baseProj.y); 
+            ctx.lineTo(baseProj.x + scaledWidth/2, baseProj.y);
+            // Taper the top to 60% of base width
+            ctx.lineTo(topProj.x + scaledWidth*0.3, topProj.y + tree.hoverOffset);
+            ctx.lineTo(topProj.x - scaledWidth*0.3, topProj.y + tree.hoverOffset);
+            ctx.closePath();
+            
+            // Pulse effect for glow
+            const pulse = Math.sin(time + tree.pulsePhase) * 0.2 + 0.8;
+            
+            // Create gradient
+            const gradient = ctx.createLinearGradient(
+                baseProj.x, baseProj.y, 
+                topProj.x, topProj.y
+            );
+            gradient.addColorStop(0, `rgba(${tree.color.r}, ${tree.color.g}, ${tree.color.b}, ${tree.color.a * 0.8})`);
+            gradient.addColorStop(1, `rgba(${tree.color.r + 30}, ${tree.color.g + 30}, ${tree.color.b + 50}, ${tree.color.a * 0.5})`);
+            
+            // Fill with translucent color
+            ctx.fillStyle = gradient;
+            ctx.fill();
+            
+            // Draw ghost layer effects (multiple transparent layers)
+            for (let i = 0; i < tree.ghostLayers; i++) {
+                const layerOffset = (i + 1) * 8 * pulse;
+                
+                ctx.beginPath();
+                ctx.moveTo(baseProj.x - scaledWidth/2 - layerOffset, baseProj.y); 
+                ctx.lineTo(baseProj.x + scaledWidth/2 + layerOffset, baseProj.y);
+                ctx.lineTo(topProj.x + scaledWidth*0.3 + layerOffset*0.5, topProj.y + tree.hoverOffset); 
+                ctx.lineTo(topProj.x - scaledWidth*0.3 - layerOffset*0.5, topProj.y + tree.hoverOffset);
+                ctx.closePath();
+                
+                const alpha = tree.ghostAlpha * (1 - i/tree.ghostLayers) * pulse;
+                ctx.fillStyle = `rgba(${tree.color.r + 20}, ${tree.color.g + 40}, ${tree.color.b + 70}, ${alpha})`;
+                ctx.fill();
+            }
+            
+            // Add glow around the tree
+            const glowSize = scaledWidth * (0.5 + pulse * 0.5) * tree.glowIntensity;
+            const glowGradient = ctx.createRadialGradient(
+                baseProj.x, (baseProj.y + topProj.y) / 2, 0,
+                baseProj.x, (baseProj.y + topProj.y) / 2, glowSize
+            );
+            
+            glowGradient.addColorStop(0, `rgba(${tree.glowColor.r}, ${tree.glowColor.g}, ${tree.glowColor.b}, ${0.2 * pulse})`);
+            glowGradient.addColorStop(1, `rgba(${tree.glowColor.r}, ${tree.glowColor.g}, ${tree.glowColor.b}, 0)`);
+            
+            ctx.fillStyle = glowGradient;
+            ctx.fillRect(
+                baseProj.x - glowSize, 
+                topProj.y - glowSize + tree.hoverOffset, 
+                glowSize * 2, 
+                (baseProj.y - topProj.y) + glowSize * 2
+            );
+        }
+        
+        // Draw a branch extending from the trunk
+        function drawBranch(tree, branch, scaleFactor) {
+            // Calculate branch start position on trunk
+            const branchY = tree.y - branch.startHeight;
+            const startProj = project3D(tree.x, branchY, tree.z);
+            
+            // Calculate branch end position
+            // Apply some swaying motion
+            const swayAmount = branch.swayAmount * Math.sin(time * branch.swaySpeed + branch.swayPhase);
+            const branchAngle = branch.angle + swayAmount * 0.05;
+            
+            const endX = tree.x + Math.cos(branchAngle) * branch.length;
+            const endY = branchY + Math.sin(branchAngle) * branch.length * 0.3; // Less vertical to look more natural
+            const endZ = tree.z + Math.sin(branchAngle) * branch.length;
+            
+            const endProj = project3D(endX, endY, endZ);
+            
+            // Calculate branch thickness at this distance
+            const thickness = branch.thickness * scaleFactor;
+            
+            // Draw the branch as a tapered line
+            ctx.beginPath();
+            ctx.moveTo(startProj.x, startProj.y + tree.hoverOffset * 0.7);
+            
+            // For segmented branches, draw multiple segments
+            if (branch.branchSegments > 1) {
+                // Create segmented branch with slight curves
+                for (let i = 1; i <= branch.branchSegments; i++) {
+                    const t = i / branch.branchSegments;
+                    // Add some randomization to the segments
+                    const segX = startProj.x + (endProj.x - startProj.x) * t + Math.sin(t * Math.PI * 2 + branch.swayPhase) * thickness * 0.5;
+                    const segY = startProj.y + (endProj.y - startProj.y) * t + Math.cos(t * Math.PI + branch.swayPhase) * thickness * 0.3;
+                    
+                    ctx.lineTo(segX, segY + tree.hoverOffset * (1 - t));
+                }
+            } else {
+                // Just draw straight to end
+                ctx.lineTo(endProj.x, endProj.y + tree.hoverOffset * 0.3);
+            }
+            
+            // Line properties
+            const color = tree.color;
+            const pulse = Math.sin(time * 0.8 + branch.swayPhase) * 0.15 + 0.85;
+            ctx.strokeStyle = `rgba(${color.r + 20}, ${color.g + 40}, ${color.b + 50}, ${color.a * pulse})`;
+            ctx.lineWidth = thickness;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+            
+            // Add glow effect
+            ctx.shadowColor = `rgba(${color.r + 50}, ${color.g + 80}, ${color.b + 100}, ${0.5 * pulse})`;
+            ctx.shadowBlur = thickness * 2;
+            ctx.stroke();
+            ctx.shadowBlur = 0; // Reset shadow blur
+        }
+        
+        // Draw a spirit trapped inside the tree
+        function drawSpirit(tree, spirit, scaleFactor) {
+            // Calculate base position and then orbit based on time
+            const baseY = tree.y - spirit.height;
+            
+            // Orbit around the center of the tree
+            const orbitAngle = spirit.angle + time * spirit.orbitSpeed;
+            const x = tree.x + Math.cos(orbitAngle) * spirit.radius;
+            const y = baseY;
+            const z = tree.z + Math.sin(orbitAngle) * spirit.radius;
+            
+            // Project to screen space
+            const proj = project3D(x, y, z);
+            
+            // Calculate size based on distance
+            const size = spirit.size * scaleFactor;
+            
+            // Pulse animation
+            const pulse = Math.sin(time * spirit.pulseSpeed + spirit.pulsePhase) * 0.3 + 0.7;
+            
+            // Draw the spirit as a glowing orb
+            const gradient = ctx.createRadialGradient(
+                proj.x, proj.y + tree.hoverOffset * 0.5, 0,
+                proj.x, proj.y + tree.hoverOffset * 0.5, size * spirit.glowSize
+            );
+            
+            const color = spirit.color;
+            gradient.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, ${color.a * pulse})`);
+            gradient.addColorStop(0.6, `rgba(${color.r * 0.8}, ${color.g * 0.8}, ${color.b}, ${color.a * 0.5 * pulse})`);
+            gradient.addColorStop(1, `rgba(${color.r * 0.6}, ${color.g * 0.6}, ${color.b}, 0)`);
+            
+            ctx.beginPath();
+            ctx.arc(proj.x, proj.y + tree.hoverOffset * 0.5, size * spirit.glowSize, 0, Math.PI * 2);
+            ctx.fillStyle = gradient;
+            ctx.fill();
+            
+            // Draw inner core
+            ctx.beginPath();
+            ctx.arc(proj.x, proj.y + tree.hoverOffset * 0.5, size * 0.4, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255, 255, 255, ${0.7 * pulse})`;
+            ctx.fill();
+            
+            // Draw flow particles orbiting the spirit
+            spirit.flowParticles.forEach((particle, i) => {
+                const particleAngle = time * particle.speed + particle.offset;
+                const px = proj.x + Math.cos(particleAngle) * particle.distance * scaleFactor;
+                const py = proj.y + Math.sin(particleAngle) * particle.distance * scaleFactor + tree.hoverOffset * 0.5;
+                
+                // Pulse effect for particle
+                const particlePulse = Math.sin(time * 3 + i) * 0.3 + 0.7;
+                
+                ctx.beginPath();
+                ctx.arc(px, py, particle.size * scaleFactor, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${particle.opacity * particlePulse})`;
+                ctx.fill();
+            });
+        }
+        
+        // Draw a leaf (Wikipedia data fragment)
+        function drawLeaf(tree, leaf, scaleFactor) {
+            // Skip if leaf image isn't loaded yet or has an error
+            if (leafImages.length <= leaf.imageIndex || 
+                !leafImages[leaf.imageIndex].complete || 
+                leafImages[leaf.imageIndex].naturalWidth === 0) {
+                return;
+            }
+            
+            // Calculate position based on placement data
+            const leafPosition = getLeafPosition(tree, leaf);
+            const x = leafPosition.x;
+            const y = leafPosition.y;
+            const z = leafPosition.z;
+            
+            // Add hover animation effect
+            const hoverOffset = tree.hoverOffset * (1 - leaf.position.h / tree.height);
+            
+            // Simpler hover animation
+            const leafHover = Math.sin(time * leaf.hoverFrequency + leaf.pulsePhase) * leaf.hoverAmplitude;
+            
+            // Project to screen space
+            const proj = project3D(x, y, z);
+            
+            // Calculate size based on distance
+            const size = leaf.size * scaleFactor;
+            
+            // Calculate rotation (combine base rotation with animation)
+            leaf.currentRotation += leaf.rotationSpeed * deltaTime;
+            
+            // Pulse animation for opacity
+            const pulse = Math.sin(time * 0.5 + leaf.pulsePhase) * 0.1 + 0.9;
+            
+            // Only draw if leaf is in view and reasonably sized
+            if (proj.x < -size || proj.x > canvas.width + size || 
+                proj.y < -size || proj.y > canvas.height + size ||
+                size < 2) {
+                return;
+            }
+            
+            // Draw the leaf image with rotation
+            ctx.save();
+            ctx.translate(proj.x, proj.y + hoverOffset + leafHover);
+            ctx.rotate(leaf.currentRotation);
+            
+            // Use global alpha for overall opacity
+            const baseOpacity = leaf.opacity * pulse;
+            ctx.globalAlpha = baseOpacity;
+            
+            // Draw the leaf image
+            const leafImage = leafImages[leaf.imageIndex];
+            
+            // Simplified drawing with tint
+            if (leaf.tint && leaf.tint.strength > 0) {
+                // Apply tint using globalCompositeOperation for better performance
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.drawImage(leafImage, -size/2, -size/2, size, size);
+                
+                // Overlay tint color
+                ctx.globalCompositeOperation = 'overlay';
+                ctx.fillStyle = `rgba(${leaf.tint.r}, ${leaf.tint.g}, ${leaf.tint.b}, ${leaf.tint.strength})`;
+                ctx.fillRect(-size/2, -size/2, size, size);
+                
+                // Reset composite operation
+                ctx.globalCompositeOperation = 'source-over';
+            } else {
+                // Normal draw without tint
+                ctx.drawImage(leafImage, -size/2, -size/2, size, size);
+            }
+            
+            // Add a single subtle glow effect - use lighter on smaller screens for performance
+            if (size > 20) {
+                ctx.globalAlpha = baseOpacity * 0.3;
+                ctx.filter = 'blur(5px)';
+                ctx.drawImage(
+                    leafImage, 
+                    -size/2 - 10, -size/2 - 10, 
+                    size + 20, size + 20
+                );
+            }
+            
+            // Reset context
+            ctx.filter = 'none';
+            ctx.globalAlpha = 1;
+            ctx.restore();
+        }
+        
+        // Draw hand landmarks for visual feedback
+        function drawHandLandmarks() {
+            if (!handLandmarks) return;
+            
+            // Define colors for constellation effect
+            const nodeColors = {
+                blue: {
+                    fill: 'rgba(100, 180, 255, 0.7)',
+                    glow: 'rgba(60, 150, 255, 0.3)'
+                },
+                gold: {
+                    fill: 'rgba(255, 215, 0, 0.7)',
+                    glow: 'rgba(255, 190, 0, 0.3)'
+                }
+            };
+            
+            // Create constellation effect
+            ctx.save();
+            
+            // Draw connections first (as constellation lines)
+            ctx.lineWidth = 1.5;
+            ctx.lineCap = 'round';
+            
+            // Define finger connections for constellation
+            const fingerConnections = [
+                // Thumb
+                [0, 1], [1, 2], [2, 3], [3, 4],
+                // Index
+                [0, 5], [5, 6], [6, 7], [7, 8],
+                // Middle
+                [5, 9], [9, 10], [10, 11], [11, 12],
+                // Ring
+                [9, 13], [13, 14], [14, 15], [15, 16],
+                // Pinky
+                [13, 17], [17, 18], [18, 19], [19, 20],
+                // Palm
+                [0, 5], [5, 9], [9, 13], [13, 17]
+            ];
+            
+            // Draw connections as subtle gradient lines
+            for (const [i, j] of fingerConnections) {
+                if (i >= handLandmarks.length || j >= handLandmarks.length) continue;
+                
+                const x1 = handLandmarks[i].x * canvas.width;
+                const y1 = handLandmarks[i].y * canvas.height;
+                const x2 = handLandmarks[j].x * canvas.width;
+                const y2 = handLandmarks[j].y * canvas.height;
+                
+                // Create gradient line
+                const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
+                gradient.addColorStop(0, 'rgba(100, 180, 255, 0.3)');
+                gradient.addColorStop(1, 'rgba(255, 215, 0, 0.3)');
+                
+                // Draw line with glow effect
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.strokeStyle = gradient;
+                ctx.stroke();
+            }
+            
+            // Add subtle glow effect to lines
+            ctx.shadowColor = 'rgba(160, 200, 255, 0.3)';
+            ctx.shadowBlur = 5;
+            
+            // Draw small stars at key joints (fingertips, knuckles)
+            const keyPoints = [4, 8, 12, 16, 20]; // Fingertips
+            const secondaryPoints = [2, 6, 10, 14, 18]; // Middle joints
+            
+            // Draw fingertips as gold stars
+            for (const i of keyPoints) {
+                if (i >= handLandmarks.length) continue;
+                
+                const x = handLandmarks[i].x * canvas.width;
+                const y = handLandmarks[i].y * canvas.height;
+                
+                // Draw gold node with glow
+                drawConstellationNode(x, y, 5, nodeColors.gold);
+            }
+            
+            // Draw knuckles as blue stars
+            for (const i of secondaryPoints) {
+                if (i >= handLandmarks.length) continue;
+                
+                const x = handLandmarks[i].x * canvas.width;
+                const y = handLandmarks[i].y * canvas.height;
+                
+                // Draw blue node with glow
+                drawConstellationNode(x, y, 4, nodeColors.blue);
+            }
+            
+            // Draw other nodes as smaller blue dots
+            for (let i = 0; i < handLandmarks.length; i++) {
+                if (keyPoints.includes(i) || secondaryPoints.includes(i)) continue;
+                
+                const x = handLandmarks[i].x * canvas.width;
+                const y = handLandmarks[i].y * canvas.height;
+                
+                // Draw smaller blue node
+                drawConstellationNode(x, y, 3, nodeColors.blue);
+            }
+            
+            ctx.restore();
+        }
+        
+        // Helper function to draw constellation nodes
+        function drawConstellationNode(x, y, size, colors) {
+            // Draw glow
+            ctx.beginPath();
+            ctx.arc(x, y, size * 2, 0, Math.PI * 2);
+            ctx.fillStyle = colors.glow;
+            ctx.fill();
+            
+            // Draw main node
+            ctx.beginPath();
+            ctx.arc(x, y, size, 0, Math.PI * 2);
+            ctx.fillStyle = colors.fill;
+            ctx.fill();
+            
+            // Add a subtle white center for sparkle
+            ctx.beginPath();
+            ctx.arc(x, y, size * 0.4, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.fill();
+        }
+        
+        // Initialize scene
+        initStars();
+        preloadLeafImages();
+        createDataTrees();
+        
+        // Start animation
+        requestAnimationFrame(animate);
     </script>
 </body>
 </html> 
